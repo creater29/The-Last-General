@@ -1,0 +1,116 @@
+# Progress Tracker
+
+## Current Stage: STAGE 2 — IN PROGRESS
+## Last Updated: 2026-06-23
+
+---
+
+## Stage 1 — Simulator [COMPLETE ✅]
+
+### Files
+- [x] src/simulator/grid.py       — 12 tests
+- [x] src/simulator/units.py      — 29 tests
+- [x] src/simulator/physics.py    — 23 tests
+- [x] src/simulator/battle.py     — 26 tests
+- [x] src/simulator/logger.py     — 27 tests + 3 terrain_knowledge methods added
+- [x] src/simulator/training_profiles.py — (tested via test_training_profiles.py)
+- Total: 117 simulator tests passing (+ 22 via training profiles)
+
+### Stage 1 Verified Results (100 battles)
+- 100 battles in 9.4s (94ms per battle)
+- 6526 observations extracted and stored
+- Result distribution: win=13, loss=63, draw=24
+- Terrain events: flood=6296, tree_fall=146, wall_collapse=78, ice_break=6
+- DB: ~/Projects/general_brain/data/episodes/general_brain.db
+
+---
+
+## Stage 2 — Brain Core [IN PROGRESS]
+
+### Target Files
+- [x] src/brain/world_model.py     — 30 tests
+- [ ] src/brain/doctrine_extractor.py
+
+### Corpus Generation
+- [x] src/simulator/training_profiles.py — 5 profiles (natural/anti_flood/terrain_learning/siege_learning/balanced)
+- [x] scripts/generate_corpus.py         — targeted generation with target counts and progress bars
+- Total: 169 tests passing
+- [ ] src/brain/player_profiler.py
+- [ ] src/brain/decision_engine.py
+- [ ] src/brain/memory.py
+- [ ] tests/test_brain.py
+
+### Completion Criteria
+After 100 simulated episodes the General:
+1. Has formed at least 3 doctrines with confidence > 0.6
+2. Has a player profile with populated fields
+3. Makes decisions that demonstrably differ from random
+4. Decision reasoning is inspectable and makes sense
+
+### Status
+world_model.py complete. Next: doctrine_extractor.py.
+
+---
+
+## Change Log
+
+### 2026-06-23 (Session 6 — Training profiles + corpus generation)
+- Built src/simulator/training_profiles.py (175 lines) — 5 profiles
+- Built scripts/generate_corpus.py (237 lines) — CLI generation tool with target counts
+- Added weather_weights param to BattleLoop (2 surgical edits, backward compatible)
+- Anti-flood profiles confirmed: 0 flood events in 20 test battles
+- Full suite: 169/169 passing
+
+### 2026-06-22 (Session 5 — world_model.py)
+- Built src/brain/world_model.py (184 lines) — 30 tests, all passing
+- Added upsert_terrain_knowledge, get_terrain_knowledge, get_all_terrain_knowledge to logger.py
+- observed_outcomes confirmed as list of distinct effect types (not counts)
+- Confidence formula: episode_count / (episode_count + 1) — confirmed intentional
+- W005 (flood dominance) explicitly deferred to doctrine_extractor — world_model represents observations accurately
+- Full suite: 147/147 passing
+
+### 2026-06-21 (Session 4 — logger.py + Stage 1 Complete)
+- Built src/simulator/logger.py (562 lines) — 27 tests
+- Full suite: 117/117 passing
+- Ran 100 battles into real DB — 9.4s total, 6526 observations
+- Stage 1 COMPLETE
+
+### 2026-06-21 (Session 3 — Fixes + Architecture)
+- Fixed zone coordinate abstraction leak
+- Fixed TERRAIN_EXPLOIT intent bug
+- Updated player memory to three-store architecture
+- Updated database schema to 7 tables
+- 90/90 tests passing
+
+### 2026-06-20 (Session 2)
+- units.py, physics.py, battle.py built and tested
+- Full suite: 90/90 passing
+
+### 2026-06-20 (Session 1)
+- grid.py built and tested (12/12)
+- Zone system redesigned: emergent military zones
+- Architecture established
+
+### 2026-06-19 (Session 0)
+- Project initialized, structure created, stack confirmed
+
+---
+
+## Decisions Made (permanent record)
+| Date       | Decision | Reason |
+|------------|----------|--------|
+| 2026-06-19 | SQLite over PostgreSQL | M1 efficiency, Stage 1-2 volume manageable |
+| 2026-06-19 | Turn-based simulator first | Simpler loop, upgrade later |
+| 2026-06-19 | Intent abstraction over coordinate actions | Doctrines must generalize |
+| 2026-06-19 | No GPU for Stage 1-2 | M1 8GB, CPU sufficient |
+| 2026-06-20 | Zone coordinates prefixed _internal | Clean brain/simulator boundary |
+| 2026-06-21 | Three memory stores | player_profiles, doctrines (anon), relationship |
+| 2026-06-21 | Observations extracted per episode | Doctrine extractor reads patterns not raw episodes |
+| 2026-06-22 | observed_outcomes = list of distinct effect types | Doctrine extractor reads effects, not counts; counts come from episode_count |
+| 2026-06-22 | W005 flood dominance handled in doctrine_extractor only | world_model represents observations faithfully; weighting is downstream concern |
+
+---
+
+## Deleted / Abandoned
+- Hardcoded zone names (left_flank, center, right_flank) — replaced by emergent zones
+- boss-fight fields in PlayerProfile (weapon_preference, dodge_bias, spell_usage) — replaced by commander-level fields
