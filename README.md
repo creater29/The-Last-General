@@ -6,28 +6,6 @@ experience, and reasons like a commander rather than an optimizer.
 
 ---
 
-## How to Resume Development (Every Session)
-
-### Step 1 — Orient Claude
-Give Claude these files to read in order:
-1. state/ARCHITECTURE.md
-2. state/PROGRESS.md
-3. state/KNOWN_ISSUES.md
-4. state/SESSION_HANDOFF.md
-
-### Step 2 — Verify Environment
-```bash
-python3 --version
-python3 -c "import sqlite3, numpy; print('deps ok')"
-ls ~/general_brain/src/
-```
-
-### Step 3 — Check SESSION_HANDOFF for exact starting point
-The handoff tells you exactly what to build next.
-Never guess. Always read it first.
-
----
-
 ## Project Structure
 ```
 general_brain/
@@ -68,10 +46,3 @@ general_brain/
 See state/SESSION_HANDOFF.md for next action.
 
 ---
-
-## Stack
-- Python 3.11+
-- SQLite (built-in)
-- numpy
-- pytest
-- Platform: macOS M1, 8GB RAM, ~40GB available storage
