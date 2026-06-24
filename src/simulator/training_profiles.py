@@ -99,14 +99,14 @@ PROFILES: Dict[str, Dict[str, Any]] = {
 
     "balanced": {
         "description": (
-            "Suppresses flood, biases unit composition toward ice_break "
-            "and wall_collapse events. Run until TARGET_COUNTS['balanced'] "
-            "is met, then switch back to 'natural'."
+            "Flood fully blocked (heavy_rain=0.0). Targets 1000 each of "
+            "ice_break, wall_collapse, and tree_fall. Switch back to "
+            "'natural' after doctrine_extractor is verified."
         ),
         "weather_weights": {
             "clear":      5.0,
             "fog":        2.0,
-            "heavy_rain": 1.0,   # allowed but low weight
+            "heavy_rain": 0.0,   # flood disabled — same as anti_flood
             "blizzard":   2.0,
             "wind":       2.0,
         },
@@ -125,10 +125,9 @@ PROFILES: Dict[str, Dict[str, Any]] = {
 TARGET_COUNTS: Dict[str, Dict[str, int]] = {
 
     "balanced": {
-        "flood":        1000,
-        "ice_break":    1000,
+        "ice_break":     1000,
         "wall_collapse": 1000,
-        "tree_fall":    1000,
+        "tree_fall":     1000,
     },
 
     "anti_flood": {

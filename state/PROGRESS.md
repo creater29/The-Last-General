@@ -1,7 +1,7 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 2 — IN PROGRESS
-## Last Updated: 2026-06-23
+## Last Updated: 2026-06-24
 
 ---
 
@@ -34,7 +34,19 @@
 ### Corpus Generation
 - [x] src/simulator/training_profiles.py — 5 profiles (natural/anti_flood/terrain_learning/siege_learning/balanced)
 - [x] scripts/generate_corpus.py         — targeted generation with target counts and progress bars
+- [x] Balanced corpus generated (1900 battles, 97s, 19.7 battles/s)
 - Total: 169 tests passing
+
+### DB State After Balanced Corpus Run
+| event        | observations |
+|--------------|-------------|
+| flood        | 118,124     | ← pre-existing from earlier flood-heavy runs
+| tree_fall    |  20,396     | ← target 1000 ✅
+| wall_collapse|  11,597     | ← target 1000 ✅
+| ice_break    |   1,011     | ← target 1000 ✅
+
+All four event types are above the 5-observation doctrine threshold.
+Corpus is ready for doctrine_extractor.py.
 - [ ] src/brain/player_profiler.py
 - [ ] src/brain/decision_engine.py
 - [ ] src/brain/memory.py
@@ -54,11 +66,22 @@ world_model.py complete. Next: doctrine_extractor.py.
 
 ## Change Log
 
+### 2026-06-24 (Session 7 — balanced profile fix + corpus generation)
+- Fixed balanced profile: heavy_rain set to 0.0, flood removed from targets
+- Fixed test_balanced_targets_three_events_no_flood to match new spec
+- Ran balanced corpus: 1900 battles, 97s, all three rare-event targets met
+- DB now has 1011 ice_break / 11597 wall_collapse / 20396 tree_fall / 118124 flood
+- Confirmed: 0 new flood events in 1900 balanced battles (block works)
+- Full suite: 169/169 passing
+
 ### 2026-06-23 (Session 6 — Training profiles + corpus generation)
 - Built src/simulator/training_profiles.py (175 lines) — 5 profiles
 - Built scripts/generate_corpus.py (237 lines) — CLI generation tool with target counts
 - Added weather_weights param to BattleLoop (2 surgical edits, backward compatible)
-- Anti-flood profiles confirmed: 0 flood events in 20 test battles
+- Fixed balanced profile: heavy_rain=0.0, flood removed from targets
+- Ran balanced corpus: 1900 battles, 97s, all targets met
+- Final DB state: flood=118124, tree_fall=20396, wall_collapse=11597, ice_break=1011
+- All four event types well above doctrine threshold (5+)
 - Full suite: 169/169 passing
 
 ### 2026-06-22 (Session 5 — world_model.py)

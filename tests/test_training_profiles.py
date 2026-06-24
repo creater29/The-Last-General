@@ -146,10 +146,12 @@ def test_target_counts_are_positive_integers():
             )
 
 
-def test_balanced_targets_four_events():
+def test_balanced_targets_three_events_no_flood():
     targets = TARGET_COUNTS["balanced"]
-    expected = {"flood", "ice_break", "wall_collapse", "tree_fall"}
-    assert set(targets.keys()) == expected
+    expected = {"ice_break", "wall_collapse", "tree_fall"}
+    assert set(targets.keys()) == expected, (
+        f"balanced targets should be {expected}, got {set(targets.keys())}"
+    )
 
 
 def test_anti_flood_targets_exclude_flood():
