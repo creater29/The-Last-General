@@ -21,7 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 import pytest
 from simulator.logger import EpisodeLogger
@@ -84,9 +85,7 @@ def test_no_simulator_internals_imported_in_doctrine_extractor():
     doctrine_extractor.py may only import from simulator.logger
     and brain.world_model. No grid, units, physics, or battle.
     """
-    src = Path(
-        "/Users/Arman/Projects/general_brain/src/brain/doctrine_extractor.py"
-    ).read_text()
+    src = (_PROJECT_ROOT / "src" / "brain" / "doctrine_extractor.py").read_text()
     forbidden = [
         "from simulator.grid",
         "from simulator.units",

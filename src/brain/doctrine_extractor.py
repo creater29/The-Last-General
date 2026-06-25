@@ -157,11 +157,15 @@ class DoctrineExtractor:
         """
         Return the highest-confidence doctrine for a terrain+action pair.
         Returns None if no doctrine exists for this combination.
+
+        Uses max() on confidence explicitly rather than relying on the
+        ordering of get_all_doctrines(), so the result is correct even
+        if the query order ever changes.
         """
         condition = f"{terrain_type}+{action_type}"
         all_docs  = self._logger.get_all_doctrines()
         matches   = [d for d in all_docs if d["condition"] == condition]
-        return matches[0] if matches else None
+        return max(matches, key=lambda d: d["confidence"]) if matches else None
 
     def doctrine_summary(self) -> Dict[str, Any]:
         """

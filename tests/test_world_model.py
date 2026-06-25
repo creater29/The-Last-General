@@ -21,7 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
+# Portable: resolve src/ relative to this test file regardless of where
+# the project is checked out.
+_PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from simulator.logger import EpisodeLogger
 from brain.world_model import WorldModel
@@ -101,7 +104,7 @@ def test_no_simulator_imports_in_world_model():
     Importing grid, units, physics, or battle would let simulator internals
     (coordinates, physics constants) leak into the brain layer.
     """
-    src = Path("/Users/Arman/Projects/general_brain/src/brain/world_model.py").read_text()
+    src = (_PROJECT_ROOT / "src" / "brain" / "world_model.py").read_text()
     forbidden = [
         "from simulator.grid",
         "from simulator.units",
