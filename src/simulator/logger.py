@@ -644,3 +644,77 @@ class EpisodeLogger:
             d["observed_outcomes"] = json.loads(d["observed_outcomes"])
             result.append(d)
         return result
+
+    # ------------------------------------------------------------------
+    # Doctrines (written by DoctrineExtractor, read by decision_engine)
+    # ------------------------------------------------------------------
+
+    def upsert_doctrine(
+        self,
+        doctrine_id:       str,
+        abstraction_level: str,
+        condition:         str,
+        learned_effect:    str,
+        confidence:        float,
+        episode_count:     int,
+        derived_principle: str,
+        last_verified:     str,
+        decay_rate:        float = 0.005,
+    ) -> None:
+        """
+        Insert or update a doctrine row.
+
+        On conflict, updates confidence, episode_count, derived_principle,
+        and last_verified — the fields that may change as more observations
+        accumulate. failure_count and exceptions are left unchanged so
+        accumulated feedback is not erased by a re-extraction.
+        """
+        conn = self._get_conn()
+        conn.execute(
+            """
+            INSERT INTO doctrines
+                (id, abstraction_level, condition, learned_effect, confidence,
+                 episode_count, failure_count, derived_principle, exceptions,
+                 last_verified, decay_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                confidence        = excluded.confidence,
+                episode_count     = excluded.episode_count,
+                derived_principle = excluded.derived_principle,
+                last_verified     = excluded.last_verified
+            """,
+            (
+                doctrine_id, abstraction_level, condition, learned_effect,
+                confidence, episode_count, 0, derived_principle,
+                "[]", last_verified, decay_rate,
+            ),
+        )
+        conn.commit()
+
+    def get_doctrine_by_id(self, doctrine_id: str) -> Optional[Dict[str, Any]]:
+        """Return one doctrine row by id, or None if not found."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM doctrines WHERE id = ?", (doctrine_id,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["exceptions"] = json.loads(d["exceptions"])
+        return d
+
+    def get_all_doctrines(self) -> List[Dict[str, Any]]:
+        """
+        Return all doctrine rows ordered by confidence descending.
+        Used by DoctrineExtractor.get_doctrines().
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM doctrines ORDER BY confidence DESC"
+        ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["exceptions"] = json.loads(d["exceptions"])
+            result.append(d)
+        return result

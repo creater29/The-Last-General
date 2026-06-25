@@ -1,7 +1,7 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 2 — IN PROGRESS
-## Last Updated: 2026-06-24
+## Last Updated: 2026-06-25
 
 ---
 
@@ -60,11 +60,20 @@ After 100 simulated episodes the General:
 4. Decision reasoning is inspectable and makes sense
 
 ### Status
-world_model.py complete. Next: doctrine_extractor.py.
+world_model.py complete. doctrine_extractor.py complete. Next: player_profiler.py.
 
 ---
 
 ## Change Log
+
+### 2026-06-25 (Session 8 — doctrine_extractor.py)
+- Added test_balanced_disables_heavy_rain + test_generate_corpus_no_flood_with_balanced_profile (2 tests)
+- Added upsert_doctrine, get_doctrine_by_id, get_all_doctrines to logger.py
+- Built src/brain/doctrine_extractor.py (202 lines) — 36 tests
+- Doctrine ids are deterministic: "doctrine_{terrain}_{action}_{effect}"
+- derived_principle uses PRINCIPLE_TEMPLATES with plain-English fallback
+- Doctrines anonymous, no coordinates, idempotent extraction confirmed
+- Full suite: 207/207 passing
 
 ### 2026-06-24 (Session 7 — balanced profile fix + corpus generation)
 - Fixed balanced profile: heavy_rain set to 0.0, flood removed from targets

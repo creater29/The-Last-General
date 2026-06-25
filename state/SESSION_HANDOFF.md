@@ -4,12 +4,12 @@
 
 ---
 
-## Session: 2026-06-24 (Session 7 — corpus balanced, ready for doctrine)
+## Session: 2026-06-25 (Session 8 — doctrine_extractor.py complete)
 
 ### FIRST THING TO DO IN NEW SESSION
 ```bash
 cd ~/Projects/general_brain
-python3 -m pytest tests/ --tb=short -q   # must be 169/169 before touching anything
+python3 -m pytest tests/ --tb=short -q   # must be 207/207 before touching anything
 ```
 Then read in this exact order:
 1. state/CLAUDE_BRIEFING.md
@@ -29,156 +29,169 @@ src/simulator/                 ALL COMPLETE — do not modify
     grid.py                    12 tests
     units.py                   29 tests
     physics.py                 23 tests
-    battle.py                  26 tests  (+ weather_weights param, BC)
-    logger.py                  27 tests  (+ 3 terrain_knowledge methods)
+    battle.py                  26 tests
+    logger.py                  27 tests
     training_profiles.py       (covered by test_training_profiles.py)
 
 scripts/
-    generate_corpus.py         COMPLETE — do not modify
+    generate_corpus.py         COMPLETE
 
 src/brain/
     __init__.py                empty (correct)
     world_model.py             COMPLETE — 30 tests
+    doctrine_extractor.py      COMPLETE — 36 tests
 
 tests/
-    test_training_profiles.py  COMPLETE — 22 tests
+    test_training_profiles.py  COMPLETE — 22 tests  (was 20, +2 this session)
     test_world_model.py        COMPLETE — 30 tests
+    test_doctrine_extractor.py COMPLETE — 36 tests
 
-Total: 169/169 tests passing
+Total: 207/207 tests passing
 ```
 
-### DB State (ready for doctrine extraction)
+### DB State
 ```
 data/episodes/general_brain.db
     episodes:          2000+
     observations:
-        flood:         118,124   (pre-existing; high confidence)
-        tree_fall:      20,396   (target met: 1000 ✅)
-        wall_collapse:  11,597   (target met: 1000 ✅)
-        ice_break:       1,011   (target met: 1000 ✅)
-    terrain_knowledge: populated (run WorldModel.update_from_observations() to refresh)
-    doctrines:         0 (next task)
+        flood:         118,124
+        tree_fall:      20,396
+        wall_collapse:  11,597
+        ice_break:       1,011
+    terrain_knowledge: populated
+    doctrines:         populated after WorldModel + DoctrineExtractor run
+    player_profiles:   0  ← next task
+    player_general_relationship: 0
 ```
-
-All four event types are well above the 5-observation doctrine promotion threshold.
-The corpus is ready. Do NOT run generate_corpus.py again unless there is a new
-event type to populate — the current data is sufficient for doctrine extraction.
 
 ---
 
-### Next Task: src/brain/doctrine_extractor.py
+### What doctrine_extractor.py Does (already built — do not rebuild)
 
-This is the second Stage 2 brain file. Build this next, before player_profiler
-or decision_engine.
+Reads terrain beliefs from WorldModel and promotes qualifying ones into
+anonymous doctrine rows.
+
+Promotion criteria:
+  - belief.confidence    >= min_confidence    (default 0.6)
+  - belief.episode_count >= min_episode_count (default 5)
+
+One doctrine per (terrain_type, action_type, effect) triple.
+Doctrine id: `f"doctrine_{terrain_type}_{action_type}_{effect}"` — deterministic.
+
+`derived_principle` uses PRINCIPLE_TEMPLATES (6 known combos) with a
+plain-English fallback for unknown combinations. No LLM, no physics values.
+
+Logger methods added this session (end of logger.py):
+  - upsert_doctrine(...)
+  - get_doctrine_by_id(id)
+  - get_all_doctrines()
+
+---
+
+### Next Task: src/brain/player_profiler.py
+
+This is the third Stage 2 brain file.
 
 **What it does:**
-Reads the General's terrain beliefs from WorldModel and promotes high-confidence
-patterns into anonymous doctrines stored in the `doctrines` table.
+Observes player behaviour across episodes and builds a per-player profile
+stored in the `player_profiles` table. This is the first file that handles
+player-specific (non-anonymous) data.
 
-**Import constraint (Rule 3 — strictly enforced):**
-- May import from `simulator.logger` and `brain.world_model` ONLY.
-- No grid, units, physics, or battle imports anywhere in the file.
-- Test enforces this by inspecting source code.
+**Import constraint (Rule 3):**
+- May import from `simulator.logger` ONLY.
+- No grid, units, physics, battle, world_model, or doctrine_extractor imports.
+- player_profiler reads episode data from the logger; it does not need beliefs
+  or doctrines.
 
-**Confirmed design decisions (do not re-open these):**
-- Promotion threshold: episode_count >= 5 observations
-- No rarity weighting in the extractor — the balanced corpus solved the data
-  problem; accurate representation is correct here
-- `derived_principle` generated now as a deterministic template string
-- Doctrines are anonymous: no player_id anywhere in doctrine rows
-- Confidence sourced from WorldModel beliefs, not recomputed from raw observations
+**Three-store memory architecture (from ARCHITECTURE.md):**
+  1. player_profiles     ← player_profiler writes here  (player-specific)
+  2. doctrines           ← doctrine_extractor wrote here (anonymous)
+  3. player_general_relationship ← written later by decision_engine or separate module
 
-**Template strings for derived_principle:**
-```python
-PRINCIPLE_TEMPLATES = {
-    ("river",       "weather",  "flood"):         "Rivers flood under heavy rain.",
-    ("frozen_lake", "cavalry",  "ice_break"):      "Heavy cavalry on frozen lakes risks ice breakage.",
-    ("frozen_lake", "siege",    "ice_break"):      "Siege engines on frozen lakes cause ice breakage.",
-    ("wall",        "siege",    "wall_collapse"):  "Siege weapons can collapse fortifications.",
-    ("forest",      "cavalry",  "tree_fall"):      "Cavalry combat in forests may fell trees.",
-    ("forest",      "infantry", "tree_fall"):      "Infantry combat in forests may fell trees.",
-}
-# Fallback for unknown combinations:
-# f"{terrain.replace('_',' ').title()} combined with {action} may cause {effect}."
-```
-
-**Expected class interface:**
-```python
-class DoctrineExtractor:
-    def __init__(self, logger: EpisodeLogger, world_model: WorldModel)
-
-    def extract_doctrines(self, min_confidence: float = 0.6) -> int
-    # Reads beliefs from world_model.get_all_beliefs()
-    # Promotes those with confidence >= min_confidence and episode_count >= 5
-    # Writes to doctrines table via logger
-    # Returns count of doctrines upserted
-
-    def get_doctrines(self) -> List[dict]
-    def get_doctrine(self, terrain_type: str, action_type: str) -> Optional[dict]
-    def doctrine_summary(self) -> dict
-```
-
-**Doctrines table schema (already in DB):**
+**player_profiles table schema (already in DB):**
 ```sql
-doctrines (
-    id               TEXT PRIMARY KEY,    -- e.g. "doctrine_river_weather"
-    abstraction_level TEXT,               -- "terrain"
-    condition         TEXT,               -- "river+weather"
-    learned_effect    TEXT,               -- "flood"
-    confidence        REAL,
-    episode_count     INTEGER,
-    failure_count     INTEGER DEFAULT 0,
-    derived_principle TEXT,
-    exceptions        JSON    DEFAULT '[]',
-    last_verified     TEXT,
-    decay_rate        REAL    DEFAULT 0.005
+player_profiles (
+    player_id          TEXT PRIMARY KEY,
+    first_seen         TEXT,
+    last_seen          TEXT,
+    total_battles      INTEGER DEFAULT 0,
+    win_count          INTEGER DEFAULT 0,
+    loss_count         INTEGER DEFAULT 0,
+    draw_count         INTEGER DEFAULT 0,
+    preferred_units    JSON    DEFAULT '[]',
+    terrain_tendencies JSON    DEFAULT '{}',
+    aggression_index   REAL    DEFAULT 0.5,
+    adaptability_score REAL    DEFAULT 0.5,
+    data               JSON    DEFAULT '{}'
 )
 ```
 
-**Logger methods to add (same pattern as terrain_knowledge):**
-- `upsert_doctrine(id, abstraction_level, condition, learned_effect, confidence,
-                   episode_count, derived_principle, last_verified)`
-- `get_doctrine_by_id(id)` → Optional[dict]
-- `get_all_doctrines()` → List[dict]
+**Expected interface:**
+```python
+class PlayerProfiler:
+    def __init__(self, logger: EpisodeLogger)
 
-**Test file:** `tests/test_doctrine_extractor.py`
-Same seed_observations + WorldModel.update_from_observations() pattern.
-See test_world_model.py for the helper — copy seed_observations exactly.
+    def update_profile(self, player_id: str) -> dict
+    # Reads all episodes for player_id from logger
+    # Computes profile fields from episode history
+    # Upserts player_profiles row
+    # Returns updated profile dict
+
+    def get_profile(self, player_id: str) -> Optional[dict]
+    def get_all_profiles(self) -> List[dict]
+    def profile_summary(self, player_id: str) -> dict
+```
+
+**Logger methods to add (same pattern as terrain_knowledge and doctrines):**
+  - upsert_player_profile(player_id, first_seen, last_seen, total_battles,
+                           win_count, loss_count, draw_count, preferred_units,
+                           terrain_tendencies, aggression_index, adaptability_score)
+  - get_player_profile(player_id) → Optional[dict]
+  - get_all_player_profiles() → List[dict]
+  - get_episodes_for_player(player_id) → List[dict]  (may already exist — check)
+
+**Key design decisions to confirm with Arman before coding:**
+1. aggression_index: how is it derived? (ratio of attack intents to total intents?
+   ratio of offensive moves to total moves? derive from episode data?)
+2. adaptability_score: how is it derived? (how much the player changes strategy
+   across battles? needs at least 2 battles to be non-trivial)
+3. preferred_units: list of unit types that appear most often in player's armies?
+   Or types that appear in winning battles?
+4. terrain_tendencies: dict of terrain_type → frequency? Or terrain_type → outcome?
+
+**Test file:** tests/test_player_profiler.py
+Same pattern as test_doctrine_extractor.py but seeding episodes rather than
+observations (player_profiler reads episode-level data).
 
 ---
 
-### Test Helper Pattern (copy into test_doctrine_extractor.py)
+### Test Helper Pattern for Episodes
+
+player_profiler reads from episodes table (player wins/losses/draws).
+To seed test data, use logger.log_episode() or insert directly:
 
 ```python
-def seed_observations(logger, terrain_context, observed_effect, count,
-                      episode_id="test_ep_001"):
+def seed_episode(logger, player_id, result, turns=20, episode_id=None):
+    import uuid
     from datetime import datetime, timezone
     timestamp = datetime.now(timezone.utc).isoformat()
+    eid = episode_id or str(uuid.uuid4())[:12]
     conn = logger._get_conn()
     conn.execute(
         "INSERT OR IGNORE INTO episodes "
         "(id, timestamp, player_id, age, result, turns_played, data) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (episode_id, timestamp, "test_player", 1, "win", 10, "{}"),
+        (eid, timestamp, player_id, 1, result, turns, "{}"),
     )
-    tag = f"{terrain_context}_{observed_effect}".replace("+", "_").replace(" ", "_")
-    for i in range(count):
-        obs_id = f"{tag}_{i:05d}"
-        conn.execute(
-            "INSERT OR IGNORE INTO observations "
-            "(id, episode_id, timestamp, terrain_context, action_taken, "
-            "observed_effect, confidence, last_verified, decay_rate) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (obs_id, episode_id, timestamp, terrain_context, "charge",
-             observed_effect, 1.0, timestamp, 0.01),
-        )
     conn.commit()
+    return eid
 ```
-
-IMPORTANT: Always use full strings in the tag (no truncation). See world_model
-test notes — truncation caused obs_id collisions between contexts sharing a prefix.
 
 ---
 
-### Open Questions
-None. All design decisions are confirmed. Build doctrine_extractor.py.
+### Open Questions for player_profiler.py
+Confirm with Arman before writing any code:
+1. aggression_index derivation
+2. adaptability_score derivation
+3. preferred_units definition
+4. terrain_tendencies definition

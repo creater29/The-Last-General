@@ -99,6 +99,14 @@ def test_siege_learning_disables_heavy_rain():
     assert weight == 0.0
 
 
+def test_balanced_disables_heavy_rain():
+    """balanced now blocks flood — heavy_rain must be 0.0."""
+    weight = PROFILES["balanced"]["weather_weights"].get("heavy_rain", -1)
+    assert weight == 0.0, (
+        f"balanced must set heavy_rain weight to 0.0, got {weight}"
+    )
+
+
 def test_anti_flood_includes_cavalry_and_siege():
     unit_types = PROFILES["anti_flood"]["general_unit_types"]
     assert unit_types is not None
@@ -257,6 +265,23 @@ def test_generate_corpus_no_flood_with_anti_flood_profile():
     freq = logger.terrain_event_frequency()
     assert freq.get("flood", 0) == 0, (
         f"anti_flood profile produced {freq.get('flood')} flood events — expected 0"
+    )
+    logger.close()
+
+
+def test_generate_corpus_no_flood_with_balanced_profile():
+    """balanced profile also sets heavy_rain=0.0 — no flood events allowed."""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from generate_corpus import run
+
+    tmp = tempfile.mktemp(suffix=".db")
+    run(profile_name="balanced", max_battles=20, report_every=999, db_path=Path(tmp))
+
+    logger = EpisodeLogger(db_path=Path(tmp))
+    freq = logger.terrain_event_frequency()
+    assert freq.get("flood", 0) == 0, (
+        f"balanced profile produced {freq.get('flood')} flood events — "
+        f"expected 0 (heavy_rain is disabled)"
     )
     logger.close()
 
