@@ -66,6 +66,16 @@ world_model.py complete. doctrine_extractor.py complete. Next: player_profiler.p
 
 ## Change Log
 
+### 2026-06-25 (Session 9 — player_profiler.py)
+- player_profiles schema: server_id+player_id composite PK (server-scoped memory)
+- Added migrate_player_profiles() to logger.py — ran on production DB
+- Added unit_types to BattleLoop._unit_summary() (BC, adds field to episode data)
+- Added logger methods: get_player_episodes, upsert_player_profile, get_player_profile, get_all_player_profiles
+- Built src/brain/player_profiler.py (258 lines) — 35 tests
+- Raw evidence in data blob; aggression_index/adaptability_score as computed columns
+- Updated 4 test_logger.py tests to new server-scoped API
+- Full suite: 242/242 passing
+
 ### 2026-06-25 (Session 8 — doctrine_extractor.py)
 - Added test_balanced_disables_heavy_rain + test_generate_corpus_no_flood_with_balanced_profile (2 tests)
 - Added upsert_doctrine, get_doctrine_by_id, get_all_doctrines to logger.py

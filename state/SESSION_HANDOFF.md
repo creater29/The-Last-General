@@ -4,194 +4,145 @@
 
 ---
 
-## Session: 2026-06-25 (Session 8 — doctrine_extractor.py complete)
+## Session: 2026-06-25 (Session 9 — player_profiler.py complete)
 
 ### FIRST THING TO DO IN NEW SESSION
 ```bash
 cd ~/Projects/general_brain
-python3 -m pytest tests/ --tb=short -q   # must be 207/207 before touching anything
+python3 -m pytest tests/ --tb=short -q   # must be 242/242 before touching anything
 ```
 Then read in this exact order:
 1. state/CLAUDE_BRIEFING.md
 2. state/ARCHITECTURE.md
 3. state/PROGRESS.md
 4. state/KNOWN_ISSUES.md
-5. state/SESSION_HANDOFF.md  ← this file
+5. state/SESSION_HANDOFF.md
 
-Do not write any code until you have confirmed test count and understanding with Arman.
+Do not write any code until confirmed with Arman.
 
 ---
 
 ### Current State of Codebase
 
 ```
-src/simulator/                 ALL COMPLETE — do not modify
+src/simulator/                 ALL COMPLETE
     grid.py                    12 tests
     units.py                   29 tests
     physics.py                 23 tests
-    battle.py                  26 tests
-    logger.py                  27 tests
+    battle.py                  26 tests  (+unit_types in _unit_summary)
+    logger.py                  31 tests  (+player profile methods)
     training_profiles.py       (covered by test_training_profiles.py)
 
 scripts/
     generate_corpus.py         COMPLETE
 
 src/brain/
-    __init__.py                empty (correct)
     world_model.py             COMPLETE — 30 tests
     doctrine_extractor.py      COMPLETE — 36 tests
+    player_profiler.py         COMPLETE — 35 tests
 
-tests/
-    test_training_profiles.py  COMPLETE — 22 tests  (was 20, +2 this session)
-    test_world_model.py        COMPLETE — 30 tests
-    test_doctrine_extractor.py COMPLETE — 36 tests
-
-Total: 207/207 tests passing
+Total: 242/242 tests passing
 ```
 
 ### DB State
 ```
 data/episodes/general_brain.db
     episodes:          2000+
-    observations:
-        flood:         118,124
-        tree_fall:      20,396
-        wall_collapse:  11,597
-        ice_break:       1,011
+    observations:      150,000+
     terrain_knowledge: populated
-    doctrines:         populated after WorldModel + DoctrineExtractor run
-    player_profiles:   0  ← next task
-    player_general_relationship: 0
+    doctrines:         populated (re-run DoctrineExtractor to refresh)
+    player_profiles:   0 rows — schema migrated, ready to write
+                       PRIMARY KEY (server_id, player_id)
 ```
 
 ---
 
-### What doctrine_extractor.py Does (already built — do not rebuild)
+### Architecture Decisions Made This Session (do not re-open)
 
-Reads terrain beliefs from WorldModel and promotes qualifying ones into
-anonymous doctrine rows.
+**Server-scoped profiles:**
+player_profiles PRIMARY KEY is (server_id, player_id). Same player on a
+different server starts with a clean slate. Episodes table has no server_id
+(raw battlefield truth is server-agnostic); server scope is applied at the
+profile layer only.
 
-Promotion criteria:
-  - belief.confidence    >= min_confidence    (default 0.6)
-  - belief.episode_count >= min_episode_count (default 5)
+**Persist facts, derive metrics:**
+- `data` JSON blob: raw evidence (intent_counts, strategy_switches,
+  loss_recoveries, unit_usage, terrain_stats)
+- Computed columns stored at write time: aggression_index, adaptability_score,
+  preferred_units, terrain_tendencies
+- Formula improvement → re-profile, no DB replay needed
 
-One doctrine per (terrain_type, action_type, effect) triple.
-Doctrine id: `f"doctrine_{terrain_type}_{action_type}_{effect}"` — deterministic.
+**Formulas (confirmed, do not change without explicit discussion):**
+```
+aggression_index   = aggressive_intents / total_intents
+adaptability_score = adaptations_after_loss / max(1, loss_count)
+preferred_units    = {unit_type: {used: N, wins: W}}
+terrain_tendencies = {terrain: {count: N, wins: W, losses: L}}
+  — counted once per terrain type per episode, not per event
+```
 
-`derived_principle` uses PRINCIPLE_TEMPLATES (6 known combos) with a
-plain-English fallback for unknown combinations. No LLM, no physics values.
-
-Logger methods added this session (end of logger.py):
-  - upsert_doctrine(...)
-  - get_doctrine_by_id(id)
-  - get_all_doctrines()
+**Hidden armies:** Profiles built only from episodes the General participated
+in. Hidden armies not visible. Flagged for future scout-intel layer (Stage 3+).
 
 ---
 
-### Next Task: src/brain/player_profiler.py
+### Next Task: src/brain/decision_engine.py
 
-This is the third Stage 2 brain file.
+This is the fourth Stage 2 brain file and the last core one.
 
 **What it does:**
-Observes player behaviour across episodes and builds a per-player profile
-stored in the `player_profiles` table. This is the first file that handles
-player-specific (non-anonymous) data.
+Given the current battle state, the General queries his terrain beliefs,
+active doctrines, and the player's profile to select the best intent
+for this turn.
 
 **Import constraint (Rule 3):**
-- May import from `simulator.logger` ONLY.
-- No grid, units, physics, battle, world_model, or doctrine_extractor imports.
-- player_profiler reads episode data from the logger; it does not need beliefs
-  or doctrines.
-
-**Three-store memory architecture (from ARCHITECTURE.md):**
-  1. player_profiles     ← player_profiler writes here  (player-specific)
-  2. doctrines           ← doctrine_extractor wrote here (anonymous)
-  3. player_general_relationship ← written later by decision_engine or separate module
-
-**player_profiles table schema (already in DB):**
-```sql
-player_profiles (
-    player_id          TEXT PRIMARY KEY,
-    first_seen         TEXT,
-    last_seen          TEXT,
-    total_battles      INTEGER DEFAULT 0,
-    win_count          INTEGER DEFAULT 0,
-    loss_count         INTEGER DEFAULT 0,
-    draw_count         INTEGER DEFAULT 0,
-    preferred_units    JSON    DEFAULT '[]',
-    terrain_tendencies JSON    DEFAULT '{}',
-    aggression_index   REAL    DEFAULT 0.5,
-    adaptability_score REAL    DEFAULT 0.5,
-    data               JSON    DEFAULT '{}'
-)
-```
+- May import from `simulator.logger`, `brain.world_model`,
+  `brain.doctrine_extractor`, and `brain.player_profiler`.
+- No simulator internals (grid, units, physics, battle).
 
 **Expected interface:**
 ```python
-class PlayerProfiler:
-    def __init__(self, logger: EpisodeLogger)
-
-    def update_profile(self, player_id: str) -> dict
-    # Reads all episodes for player_id from logger
-    # Computes profile fields from episode history
-    # Upserts player_profiles row
-    # Returns updated profile dict
-
-    def get_profile(self, player_id: str) -> Optional[dict]
-    def get_all_profiles(self) -> List[dict]
-    def profile_summary(self, player_id: str) -> dict
-```
-
-**Logger methods to add (same pattern as terrain_knowledge and doctrines):**
-  - upsert_player_profile(player_id, first_seen, last_seen, total_battles,
-                           win_count, loss_count, draw_count, preferred_units,
-                           terrain_tendencies, aggression_index, adaptability_score)
-  - get_player_profile(player_id) → Optional[dict]
-  - get_all_player_profiles() → List[dict]
-  - get_episodes_for_player(player_id) → List[dict]  (may already exist — check)
-
-**Key design decisions to confirm with Arman before coding:**
-1. aggression_index: how is it derived? (ratio of attack intents to total intents?
-   ratio of offensive moves to total moves? derive from episode data?)
-2. adaptability_score: how is it derived? (how much the player changes strategy
-   across battles? needs at least 2 battles to be non-trivial)
-3. preferred_units: list of unit types that appear most often in player's armies?
-   Or types that appear in winning battles?
-4. terrain_tendencies: dict of terrain_type → frequency? Or terrain_type → outcome?
-
-**Test file:** tests/test_player_profiler.py
-Same pattern as test_doctrine_extractor.py but seeding episodes rather than
-observations (player_profiler reads episode-level data).
-
----
-
-### Test Helper Pattern for Episodes
-
-player_profiler reads from episodes table (player wins/losses/draws).
-To seed test data, use logger.log_episode() or insert directly:
-
-```python
-def seed_episode(logger, player_id, result, turns=20, episode_id=None):
-    import uuid
-    from datetime import datetime, timezone
-    timestamp = datetime.now(timezone.utc).isoformat()
-    eid = episode_id or str(uuid.uuid4())[:12]
-    conn = logger._get_conn()
-    conn.execute(
-        "INSERT OR IGNORE INTO episodes "
-        "(id, timestamp, player_id, age, result, turns_played, data) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (eid, timestamp, player_id, 1, result, turns, "{}"),
+class DecisionEngine:
+    def __init__(
+        self,
+        logger:    EpisodeLogger,
+        world_model: WorldModel,
+        doctrine_extractor: DoctrineExtractor,
+        player_profiler: PlayerProfiler,
     )
-    conn.commit()
-    return eid
+
+    def choose_intent(
+        self,
+        server_id:   str,
+        player_id:   str,
+        battle_state_summary: dict,   # brain-facing snapshot from BattleState
+    ) -> str
+    # Returns intent name string: "aggressive_push", "defensive", etc.
+    # Uses doctrines + player profile to rank available intents
+    # Returns best intent or "defensive" as safe fallback
+
+    def explain_choice(
+        self,
+        server_id: str,
+        player_id: str,
+        battle_state_summary: dict,
+    ) -> dict
+    # Same as choose_intent but also returns reasoning:
+    #   {intent, confidence, reasoning: [...], doctrines_consulted: [...]}
 ```
 
----
+**Design questions to confirm with Arman before coding:**
+1. What is `battle_state_summary`? The BattleState.to_episode() output minus
+   terrain_events and combat_results (those are post-battle). Probably: result,
+   battlefield_features, current weather, current turn count.
+2. How does the engine rank intents? Candidate design:
+   - Start with all GeneralIntents as candidates
+   - Boost intents supported by high-confidence doctrines for current terrain
+   - Adjust for player profile (if player is aggressive, defend more; if
+     player avoids river, use TERRAIN_EXPLOIT near rivers)
+   - Return highest-scored intent
+3. How is player profile used? Counter-strategy: if player aggression_index > 0.7,
+   prefer DEFENSIVE or AMBUSH. If player terrain_tendencies shows river avoidance,
+   TERRAIN_EXPLOIT becomes more attractive.
 
-### Open Questions for player_profiler.py
-Confirm with Arman before writing any code:
-1. aggression_index derivation
-2. adaptability_score derivation
-3. preferred_units definition
-4. terrain_tendencies definition
+**Test file:** tests/test_decision_engine.py

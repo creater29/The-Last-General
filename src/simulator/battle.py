@@ -147,6 +147,11 @@ class BattleState:
 
     def _unit_summary(self, units: List[Unit]) -> dict:
         alive = [u for u in units if u.is_alive()]
+        # Count starting units by type so the brain can track unit composition.
+        type_counts: Dict[str, int] = {}
+        for u in units:
+            label = u.unit_type.value
+            type_counts[label] = type_counts.get(label, 0) + 1
         return {
             "total":       len(units),
             "surviving":   len(alive),
@@ -154,6 +159,7 @@ class BattleState:
             "avg_health":  round(sum(u.health for u in alive) / max(1, len(alive)), 3),
             "avg_supply":  round(sum(u.supply for u in alive) / max(1, len(alive)), 3),
             "avg_morale":  round(sum(u.morale for u in alive) / max(1, len(alive)), 3),
+            "unit_types":  type_counts,
         }
 
 

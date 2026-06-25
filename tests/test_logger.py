@@ -231,37 +231,64 @@ def test_observation_patterns_requires_min_count():
 
 def test_upsert_player_profile_new():
     logger = temp_logger()
-    data = {"tactical": {"favorite_opening": "cavalry_rush"}}
-    logger.upsert_player_profile("arman", data, age=1)
-    profile = logger.get_player_profile("arman")
+    logger.upsert_player_profile(
+        server_id="srv_1", player_id="arman",
+        first_seen="2026-01-01T00:00:00+00:00",
+        last_seen="2026-01-01T00:00:00+00:00",
+        total_battles=1, win_count=1, loss_count=0, draw_count=0,
+        preferred_units={"cavalry": {"used": 2, "wins": 1}},
+        terrain_tendencies={"river": {"count": 1, "wins": 1, "losses": 0}},
+        aggression_index=0.8, adaptability_score=0.5,
+        raw_data={"intent_counts": {"aggressive_push": 3}},
+    )
+    profile = logger.get_player_profile("srv_1", "arman")
     assert profile is not None
-    assert profile["encounter_count"] == 1
-    assert profile["data"]["tactical"]["favorite_opening"] == "cavalry_rush"
+    assert profile["server_id"]    == "srv_1"
+    assert profile["player_id"]    == "arman"
+    assert profile["total_battles"] == 1
+    assert profile["win_count"]    == 1
     logger.close()
 
-def test_upsert_player_profile_increments_count():
+def test_upsert_player_profile_overwrites_on_conflict():
+    """Upserting the same (server_id, player_id) pair updates the row."""
     logger = temp_logger()
-    data = {"tactical": {}}
-    logger.upsert_player_profile("arman", data, age=1)
-    logger.upsert_player_profile("arman", data, age=2)
-    logger.upsert_player_profile("arman", data, age=3)
-    profile = logger.get_player_profile("arman")
-    assert profile["encounter_count"] == 3
-    assert profile["last_seen_age"] == 3
+    kwargs = dict(
+        server_id="srv_1", player_id="arman",
+        first_seen="2026-01-01T00:00:00+00:00",
+        last_seen="2026-01-01T00:00:00+00:00",
+        total_battles=1, win_count=1, loss_count=0, draw_count=0,
+        preferred_units={}, terrain_tendencies={},
+        aggression_index=0.5, adaptability_score=0.5,
+        raw_data={},
+    )
+    logger.upsert_player_profile(**kwargs)
+    logger.upsert_player_profile(**{**kwargs, "total_battles": 5, "win_count": 3})
+    profile = logger.get_player_profile("srv_1", "arman")
+    assert profile["total_battles"] == 5
+    assert profile["win_count"]     == 3
     logger.close()
 
-def test_get_known_players():
+def test_get_all_player_profiles_server_filter():
+    """get_all_player_profiles(server_id=...) returns only that server's profiles."""
     logger = temp_logger()
-    logger.upsert_player_profile("arman",   {}, age=1)
-    logger.upsert_player_profile("player2", {}, age=1)
-    known = logger.get_known_players()
-    assert "arman"   in known
-    assert "player2" in known
+    base = dict(
+        first_seen="2026-01-01T00:00:00+00:00",
+        last_seen="2026-01-01T00:00:00+00:00",
+        total_battles=1, win_count=1, loss_count=0, draw_count=0,
+        preferred_units={}, terrain_tendencies={},
+        aggression_index=0.5, adaptability_score=0.5,
+        raw_data={},
+    )
+    logger.upsert_player_profile(server_id="srv_A", player_id="arman",   **base)
+    logger.upsert_player_profile(server_id="srv_B", player_id="player2", **base)
+    srv_a = logger.get_all_player_profiles(server_id="srv_A")
+    assert len(srv_a) == 1
+    assert srv_a[0]["player_id"] == "arman"
     logger.close()
 
 def test_unknown_player_returns_none():
     logger = temp_logger()
-    assert logger.get_player_profile("nobody") is None
+    assert logger.get_player_profile("srv_1", "nobody") is None
     logger.close()
 
 
