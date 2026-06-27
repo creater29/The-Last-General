@@ -66,6 +66,18 @@ world_model.py complete. doctrine_extractor.py complete. Next: player_profiler.p
 
 ## Change Log
 
+### 2026-06-25 (Session 10 — decision_engine.py + snapshot)
+- Created src/simulator/snapshot.py: CommanderKnowledge dataclass (20 tests)
+- Added BattleLoop.to_brain_snapshot() — live perception snapshot, no coordinates
+- Updated Rule 3 in CLAUDE_BRIEFING.md: snapshot.py now permitted for brain imports
+- Built src/brain/decision_engine.py (456 lines): hierarchical reasoning pipeline
+  - Situation filter → Doctrine evaluation → Player adaptation → Situation fit
+  - Multiplicative scoring: doctrine × player × situation factors
+  - decide() returns full trace: intent, confidence, reasoning, rejected, alternatives
+  - choose_intent() is a one-liner wrapper
+- 43 decision engine tests + 20 snapshot tests
+- Full suite: 304/304 passing
+
 ### 2026-06-25 (Session 9 — player_profiler.py)
 - player_profiles schema: server_id+player_id composite PK (server-scoped memory)
 - Added migrate_player_profiles() to logger.py — ran on production DB

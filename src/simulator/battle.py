@@ -235,6 +235,80 @@ class BattleLoop:
 
         return self.state
 
+    def to_brain_snapshot(
+        self, server_id: str, player_id: str
+    ) -> "CommanderKnowledge":
+        """
+        Return a CommanderKnowledge snapshot of the current live battle state.
+
+        Called during a battle turn to give the decision engine a perception-
+        filtered view of the battlefield. Omits coordinates, unit rosters,
+        physics constants, and any information that requires a scout report.
+
+        This is the only method in BattleLoop that the brain layer is
+        permitted to call. All other BattleLoop state is simulator-internal.
+        """
+        from simulator.snapshot import CommanderKnowledge
+
+        alive_friendly = [u for u in self.general_units if u.is_alive()]
+        alive_enemy    = [u for u in self.player_units  if u.is_alive()]
+
+        def _avg(units: list, attr: str) -> float:
+            if not units:
+                return 0.0
+            return round(sum(getattr(u, attr) for u in units) / len(units), 3)
+
+        # Friendly state — General knows his own forces fully
+        known_friendly_state = {
+            "count":       len(alive_friendly),
+            "avg_health":  _avg(alive_friendly, "health"),
+            "avg_morale":  _avg(alive_friendly, "morale"),
+            "avg_supply":  _avg(alive_friendly, "supply"),
+            "has_siege":   any(
+                u.unit_type == UnitType.SIEGE for u in alive_friendly
+            ),
+            "has_cavalry": any(
+                u.unit_type == UnitType.CAVALRY for u in alive_friendly
+            ),
+        }
+
+        # Enemy state — aggregate only, no unit type roster
+        # (hidden armies not reported by scouts remain unknown)
+        known_enemy_presence = {
+            "count":      len(alive_enemy),
+            "avg_health": _avg(alive_enemy, "health"),
+            "avg_morale": _avg(alive_enemy, "morale"),
+            "avg_supply": _avg(alive_enemy, "supply"),
+        }
+
+        # Visible terrain — type strings only, no coordinates
+        features = self.state.battlefield_features
+        has_forest = bool(self.grid.cells_of_type(TerrainType.FOREST))
+        visible_terrain: List[str] = []
+        if features.get("has_frozen_lake"):  visible_terrain.append("frozen_lake")
+        if features.get("has_river"):        visible_terrain.append("river")
+        if features.get("has_walls"):        visible_terrain.append("wall")
+        if has_forest:                       visible_terrain.append("forest")
+
+        # Enrich battlefield_features with forest flag (not in grid method)
+        full_features = {**features, "has_forest": has_forest}
+        full_features["has_hazard"] = (
+            features.get("has_frozen_lake", False)
+            or features.get("has_river", False)
+        )
+
+        return CommanderKnowledge(
+            server_id             = server_id,
+            player_id             = player_id,
+            turn                  = self.turn,
+            weather               = self.weather,
+            battlefield_features  = full_features,
+            known_enemy_presence  = known_enemy_presence,
+            known_friendly_state  = known_friendly_state,
+            visible_terrain       = visible_terrain,
+            visible_events        = list(self.state.terrain_events),
+        )
+
     # ------------------------------------------------------------------
     # Turn execution
     # ------------------------------------------------------------------

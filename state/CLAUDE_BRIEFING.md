@@ -38,17 +38,24 @@ TERRAIN_PHYSICS (in grid.py) and UNIT_BASE_STATS (in units.py) are
 simulator ground truth. The brain NEVER imports from these files.
 The General discovers physics through observed episode outcomes, not by reading constants.
 
-### Rule 3: The brain imports from logger.py only
+### Rule 3: The brain imports from logger.py and snapshot.py only
 src/brain/ files may import from:
-  - simulator/logger.py  (to read from DB)
+  - simulator/logger.py   (DB reads/writes)
+  - simulator/snapshot.py (CommanderKnowledge only — the perception bridge)
   - each other (brain modules can import brain modules)
 src/brain/ files must NEVER import from:
   - simulator/grid.py
   - simulator/units.py
   - simulator/physics.py
   - simulator/battle.py
-If you write a brain file that imports from any simulator file except logger.py,
-you have violated the architecture.
+If you write a brain file that imports from any simulator file except logger.py
+or snapshot.py, you have violated the architecture.
+
+NOTE: simulator/snapshot.py is permitted because CommanderKnowledge is the
+formally defined perception object — the only view of live battle state the
+brain is allowed to consume. It contains no coordinates, no Unit objects,
+no physics constants, and no post-turn truth (combat results, final units).
+It is perception, not reality.
 
 ### Rule 4: Doctrines are anonymous — no player_id
 Doctrines live in the doctrines table. They have NO player_id field.

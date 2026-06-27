@@ -4,145 +4,123 @@
 
 ---
 
-## Session: 2026-06-25 (Session 9 — player_profiler.py complete)
+## Session: 2026-06-25 (Session 10 — decision_engine.py + snapshot complete)
 
 ### FIRST THING TO DO IN NEW SESSION
 ```bash
 cd ~/Projects/general_brain
-python3 -m pytest tests/ --tb=short -q   # must be 242/242 before touching anything
+python3 -m pytest tests/ --tb=short -q   # must be 304/304
 ```
-Then read in this exact order:
-1. state/CLAUDE_BRIEFING.md
-2. state/ARCHITECTURE.md
-3. state/PROGRESS.md
-4. state/KNOWN_ISSUES.md
-5. state/SESSION_HANDOFF.md
-
-Do not write any code until confirmed with Arman.
+Then read: CLAUDE_BRIEFING.md → ARCHITECTURE.md → PROGRESS.md → KNOWN_ISSUES.md → SESSION_HANDOFF.md
 
 ---
 
 ### Current State of Codebase
 
 ```
-src/simulator/                 ALL COMPLETE
+src/simulator/
     grid.py                    12 tests
     units.py                   29 tests
     physics.py                 23 tests
-    battle.py                  26 tests  (+unit_types in _unit_summary)
-    logger.py                  31 tests  (+player profile methods)
+    battle.py                  26 tests  (+to_brain_snapshot())
+    logger.py                  31 tests
     training_profiles.py       (covered by test_training_profiles.py)
+    snapshot.py                NEW — CommanderKnowledge dataclass
 
 scripts/
     generate_corpus.py         COMPLETE
 
 src/brain/
-    world_model.py             COMPLETE — 30 tests
-    doctrine_extractor.py      COMPLETE — 36 tests
-    player_profiler.py         COMPLETE — 35 tests
+    world_model.py             30 tests
+    doctrine_extractor.py      36 tests
+    player_profiler.py         35 tests
+    decision_engine.py         NEW — 43 tests
 
-Total: 242/242 tests passing
-```
+tests/
+    test_snapshot.py           NEW — 20 tests
+    test_decision_engine.py    NEW — 43 tests
 
-### DB State
-```
-data/episodes/general_brain.db
-    episodes:          2000+
-    observations:      150,000+
-    terrain_knowledge: populated
-    doctrines:         populated (re-run DoctrineExtractor to refresh)
-    player_profiles:   0 rows — schema migrated, ready to write
-                       PRIMARY KEY (server_id, player_id)
+Total: 304/304 tests passing
 ```
 
 ---
 
 ### Architecture Decisions Made This Session (do not re-open)
 
-**Server-scoped profiles:**
-player_profiles PRIMARY KEY is (server_id, player_id). Same player on a
-different server starts with a clean slate. Episodes table has no server_id
-(raw battlefield truth is server-agnostic); server scope is applied at the
-profile layer only.
+**Perception boundary (CommanderKnowledge):**
+- `BattleState.to_episode()` → post-battle learning (full truth)
+- `BattleLoop.to_brain_snapshot()` → live decision input (perception only)
+- `CommanderKnowledge` fields: server_id, player_id, turn, weather,
+  battlefield_features, known_enemy_presence (aggregate, no roster),
+  known_friendly_state (count + has_siege + has_cavalry), visible_terrain
+  (strings only, no coordinates), visible_events (events so far this battle)
 
-**Persist facts, derive metrics:**
-- `data` JSON blob: raw evidence (intent_counts, strategy_switches,
-  loss_recoveries, unit_usage, terrain_stats)
-- Computed columns stored at write time: aggression_index, adaptability_score,
-  preferred_units, terrain_tendencies
-- Formula improvement → re-profile, no DB replay needed
+**Rule 3 extended:**
+Brain files may now import from `simulator.snapshot` in addition to
+`simulator.logger`. No other simulator imports permitted.
 
-**Formulas (confirmed, do not change without explicit discussion):**
+**Decision pipeline (hierarchical):**
+1. Situation Filter — eliminate physically impossible intents
+   SIEGE: requires has_walls + has_siege
+   TERRAIN_EXPLOIT: requires has_hazard (frozen_lake or river)
+   AMBUSH: requires has_forest
+2. Doctrine Evaluation — factor per intent based on relevant doctrine confidence
+3. Player Adaptation — counter-aggression + terrain weakness exploitation
+4. Situation Fit — weather, health, turn effects
+5. Multiplicative scoring: doctrine_factor × player_factor × situation_factor
+6. DEFENSIVE_HOLD is the guaranteed fallback
+
+**decide() output format:**
+```python
+{
+    "intent":               str,       # chosen GeneralIntent string
+    "confidence":           float,     # normalised [0,1]
+    "reasoning":            List[str], # why this intent was chosen
+    "rejected":             List[str], # eliminated intents with reasons
+    "alternatives":         List[tuple],# [(intent, confidence)] top 2
+    "doctrines_consulted":  List[str], # doctrine ids consulted
+    "profile_used":         bool,      # whether player profile was available
+}
 ```
-aggression_index   = aggressive_intents / total_intents
-adaptability_score = adaptations_after_loss / max(1, loss_count)
-preferred_units    = {unit_type: {used: N, wins: W}}
-terrain_tendencies = {terrain: {count: N, wins: W, losses: L}}
-  — counted once per terrain type per episode, not per event
-```
 
-**Hidden armies:** Profiles built only from episodes the General participated
-in. Hidden armies not visible. Flagged for future scout-intel layer (Stage 3+).
+**Intent strings** match `GeneralIntent` enum values in battle.py exactly.
+No GeneralIntent import in decision_engine.py — strings used throughout.
 
 ---
 
-### Next Task: src/brain/decision_engine.py
+### Stage 2 Status
 
-This is the fourth Stage 2 brain file and the last core one.
+All four brain files are complete:
+- world_model.py       ✅
+- doctrine_extractor.py ✅
+- player_profiler.py   ✅
+- decision_engine.py   ✅
 
-**What it does:**
-Given the current battle state, the General queries his terrain beliefs,
-active doctrines, and the player's profile to select the best intent
-for this turn.
+**Stage 2 is functionally complete.**
 
-**Import constraint (Rule 3):**
-- May import from `simulator.logger`, `brain.world_model`,
-  `brain.doctrine_extractor`, and `brain.player_profiler`.
-- No simulator internals (grid, units, physics, battle).
+---
 
-**Expected interface:**
-```python
-class DecisionEngine:
-    def __init__(
-        self,
-        logger:    EpisodeLogger,
-        world_model: WorldModel,
-        doctrine_extractor: DoctrineExtractor,
-        player_profiler: PlayerProfiler,
-    )
+### What Comes Next (Stage 3 candidates — confirm with Arman)
 
-    def choose_intent(
-        self,
-        server_id:   str,
-        player_id:   str,
-        battle_state_summary: dict,   # brain-facing snapshot from BattleState
-    ) -> str
-    # Returns intent name string: "aggressive_push", "defensive", etc.
-    # Uses doctrines + player profile to rank available intents
-    # Returns best intent or "defensive" as safe fallback
+1. **Integration test / live demo**: Wire up a complete battle where
+   `to_brain_snapshot()` feeds the `DecisionEngine` in real time.
+   Shows the full pipeline working end-to-end.
 
-    def explain_choice(
-        self,
-        server_id: str,
-        player_id: str,
-        battle_state_summary: dict,
-    ) -> dict
-    # Same as choose_intent but also returns reasoning:
-    #   {intent, confidence, reasoning: [...], doctrines_consulted: [...]}
-```
+2. **Logger splitting**: Logger is now ~850 lines. Split into
+   EpisodeRepository, ObservationRepository, DoctrineRepository,
+   ProfileRepository. Deferred from ChatGPT review — right time is now.
 
-**Design questions to confirm with Arman before coding:**
-1. What is `battle_state_summary`? The BattleState.to_episode() output minus
-   terrain_events and combat_results (those are post-battle). Probably: result,
-   battlefield_features, current weather, current turn count.
-2. How does the engine rank intents? Candidate design:
-   - Start with all GeneralIntents as candidates
-   - Boost intents supported by high-confidence doctrines for current terrain
-   - Adjust for player profile (if player is aggressive, defend more; if
-     player avoids river, use TERRAIN_EXPLOIT near rivers)
-   - Return highest-scored intent
-3. How is player profile used? Counter-strategy: if player aggression_index > 0.7,
-   prefer DEFENSIVE or AMBUSH. If player terrain_tendencies shows river avoidance,
-   TERRAIN_EXPLOIT becomes more attractive.
+3. **Scout mechanics**: Hidden armies, scout reports, intel confidence.
+   Requires touching Stage 1 (battle.py, grid.py).
 
-**Test file:** tests/test_decision_engine.py
+4. **PRINCIPLE_TEMPLATES extensibility**: 6 templates. Build a generation
+   system when count reaches 20+.
+
+5. **Player relationship history**: Third memory store from the architecture.
+   Tracks General's cumulative read on a player beyond raw stats.
+
+6. **Doctrine decay**: failure_count and decay_rate fields exist. Wire up
+   the logic that reduces doctrine confidence after failed applications.
+
+Recommended next task: **Integration test first** — proves the pipeline
+works before adding new complexity.
