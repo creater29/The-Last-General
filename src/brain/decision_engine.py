@@ -134,17 +134,21 @@ def _doctrine_factor(
     intent:    str,
     doctrines: List[Dict[str, Any]],
     knowledge: CommanderKnowledge,
-) -> Tuple[float, List[str]]:
+) -> Tuple[float, List[str], List[str]]:
     """
-    Return (factor, reasoning_lines) based on how well doctrines support
-    this intent given current visible terrain.
+    Return (factor, reasoning_lines, matched_doctrine_ids) based on how well
+    doctrines support this intent given current visible terrain.
 
     factor = 1.0 (neutral) if no relevant doctrine exists.
-    factor in [0.8, 1.5] otherwise.
+    factor in [0.8, 1.5] otherwise, computed from effective_confidence
+    which applies decay_rate: effective = confidence * (1 - decay_rate).
+
+    The third return value contains the real DB id(s) of matched doctrines —
+    these are what DecisionEngine.record_battle_outcome() increments on loss.
     """
     terrain_types = INTENT_TERRAIN_RELEVANCE.get(intent, [])
     if not terrain_types:
-        return 1.0, []
+        return 1.0, [], []
 
     visible = set(knowledge.visible_terrain)
     relevant = [
@@ -153,16 +157,25 @@ def _doctrine_factor(
         and d["condition"].split("+")[0] in visible
     ]
     if not relevant:
-        return 1.0, []
+        return 1.0, [], []
 
     best = max(relevant, key=lambda d: d["confidence"])
-    # Linearly map confidence [0.6, 1.0] → factor [1.0, 1.5]
-    raw = 1.0 + (best["confidence"] - 0.6) * 1.25
+
+    # Apply decay_rate: doctrines that have failed repeatedly lose influence
+    decay_rate           = best.get("decay_rate", 0.005)
+    effective_confidence = round(best["confidence"] * (1.0 - decay_rate), 4)
+
+    # Linearly map effective_confidence [0.6, 1.0] → factor [1.0, 1.5]
+    raw    = 1.0 + (effective_confidence - 0.6) * 1.25
     factor = round(max(0.8, min(1.5, raw)), 3)
-    return factor, [
+
+    notes = [
         f"Doctrine: {best['derived_principle']} "
-        f"(confidence {best['confidence']:.2f})"
+        f"(confidence {effective_confidence:.4f}"
+        + (f", decay {decay_rate:.4f}" if decay_rate > 0.005 else "")
+        + ")"
     ]
+    return factor, notes, [best["id"]]
 
 
 # ---------------------------------------------------------------------------
@@ -378,19 +391,14 @@ class DecisionEngine:
         doc_refs: Dict[str, List[str]]   = {}
 
         for intent in available:
-            d_factor, d_notes = _doctrine_factor(intent, doctrines, knowledge)
-            p_factor, p_notes = _player_factor(intent, profile, knowledge)
-            s_factor, s_notes = _situation_factor(intent, knowledge)
+            d_factor, d_notes, d_ids = _doctrine_factor(intent, doctrines, knowledge)
+            p_factor, p_notes        = _player_factor(intent, profile, knowledge)
+            s_factor, s_notes        = _situation_factor(intent, knowledge)
 
             score = round(d_factor * p_factor * s_factor, 4)
-            scores[intent] = score
-            traces[intent] = d_notes + p_notes + s_notes
-
-            # Track which doctrine ids were consulted
-            doc_refs[intent] = [
-                f"doctrine_{knowledge.visible_terrain[0] if knowledge.visible_terrain else 'unknown'}"
-                f"_{'_'.join(INTENT_TERRAIN_RELEVANCE.get(intent, []))}"
-            ] if INTENT_TERRAIN_RELEVANCE.get(intent) else []
+            scores[intent]   = score
+            traces[intent]   = d_notes + p_notes + s_notes
+            doc_refs[intent] = d_ids   # real doctrine IDs from DB
 
         # Step 5 — Rank and select
         if not scores:
@@ -432,6 +440,35 @@ class DecisionEngine:
     def choose_intent(self, knowledge: CommanderKnowledge) -> str:
         """Convenience wrapper — returns only the intent string."""
         return self.decide(knowledge)["intent"]
+
+    def record_battle_outcome(
+        self,
+        result:         str,
+        decisions_made: List[Dict[str, Any]],
+    ) -> int:
+        """
+        After a battle ends, penalise doctrines that backed decisions in a loss.
+
+        Called once per battle with:
+          result         — "win" | "loss" | "draw"
+          decisions_made — list of decide() output dicts, one per turn
+
+        Only "loss" triggers failure increments. Win and draw leave doctrines
+        unchanged (they will be re-verified naturally by extract_doctrines()).
+
+        Returns the number of failure_count increments applied.
+        """
+        if result != "loss":
+            return 0
+
+        increments = 0
+        for decision in decisions_made:
+            for doc_id in decision.get("doctrines_consulted", []):
+                if doc_id:
+                    updated = self._logger.increment_doctrine_failure(doc_id)
+                    if updated:
+                        increments += 1
+        return increments
 
     # ------------------------------------------------------------------
     # Private helpers

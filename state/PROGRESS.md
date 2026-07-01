@@ -1,8 +1,8 @@
 # Progress Tracker
 
-## Current Stage: STAGE 2 — COMPLETE ✅
-## Last Updated: 2026-06-27
-## Test Count: 304/304
+## Current Stage: STAGE 3 — IN PROGRESS 🔄
+## Last Updated: 2026-06-29
+## Test Count: 318/318
 
 ---
 
@@ -14,7 +14,7 @@
 | src/simulator/units.py | 29 | Unit types, mass, behaviour |
 | src/simulator/physics.py | 23 | Terrain interaction engine |
 | src/simulator/battle.py | 26 | Battle loop + to_brain_snapshot() |
-| src/simulator/logger.py | 31 | SQLite persistence, all DB access |
+| src/simulator/logger.py | 35 | SQLite persistence, all DB access |
 | src/simulator/snapshot.py | 20 | CommanderKnowledge dataclass |
 | src/simulator/training_profiles.py | 22 | Corpus generation profiles |
 | scripts/generate_corpus.py | (integration) | CLI generation tool |
@@ -34,7 +34,7 @@
 | src/brain/world_model.py | 30 | Terrain beliefs from observations |
 | src/brain/doctrine_extractor.py | 36 | Promotes beliefs → doctrines |
 | src/brain/player_profiler.py | 35 | Per-player behaviour profiles |
-| src/brain/decision_engine.py | 43 | Hierarchical reasoning pipeline |
+| src/brain/decision_engine.py | 57 | Hierarchical reasoning pipeline |
 
 ### Stage 2 Completion Criteria (all met)
 - ✅ General forms 4 doctrines with confidence > 0.6 (one per terrain event type)
@@ -42,6 +42,79 @@
 - ✅ Decisions differ by context (TERRAIN_EXPLOIT on frozen lake, DEFENSIVE_HOLD vs aggressive player)
 - ✅ Decision reasoning is inspectable (full trace in decide() output)
 - ✅ 304/304 tests passing
+
+---
+
+## Stage 3 — Live Pipeline [IN PROGRESS 🔄]
+
+### Candidate A — Live Integration Test [COMPLETE ✅]
+**Completed:** 2026-06-28
+**File:** scripts/run_integration_test.py
+
+Wires to_brain_snapshot() → DecisionEngine.decide() → GeneralIntent in a live
+battle loop. First time simulator and brain ran together end-to-end.
+
+**Results (seed=42, 30 turns):**
+- Battle result: WIN
+- Decisions made: 30/30 (every turn)
+- Doctrines consulted: 30 (doctrine influence confirmed)
+- Rejected intents: 30 (SIEGE filtered every turn — no siege units)
+- Pipeline errors: 0
+- Post-battle analysis: executed successfully (5 beliefs, 5 doctrines)
+
+**Success criteria: 7/7 PASS**
+- [✓] Pre-battle knowledge priming executed
+- [✓] Doctrine influence detected (30 consultations)
+- [✓] Decision logged every turn (30/30)
+- [✓] All 8 intent strings → GeneralIntent enum verified
+- [✓] Decision trace complete on all turns
+- [✓] Pipeline completed with 0 errors
+- [✓] Post-battle analysis pipeline executed
+
+**Observed behaviors (confirms correct design):**
+- Doctrines loaded: 5 with confidence 0.9872–1.0000
+- Weather-driven oscillation visible: TERRAIN_EXPLOIT (clear) → AMBUSH (fog) → TERRAIN_EXPLOIT
+- Situation factor confirmed working: fog × AMBUSH = ×1.4 factor beats frozen_lake doctrine
+- Decision trace readable and inspectable per turn
+
+**Known defect exposed (W009 — see KNOWN_ISSUES.md):**
+- doctrines_consulted shows synthetic IDs, not real doctrine IDs from DB
+- Example: `['doctrine_frozen_lake_frozen_lake_river']` instead of `'doctrine_river_weather_flood'`
+- Must fix before Candidate B (feedback loop needs real IDs to increment failure_count)
+
+### Candidate B — Doctrine Feedback Loop [COMPLETE ✅]
+**Completed:** 2026-06-29
+
+**Part 1 — Fixed W009:**
+- `_doctrine_factor()` returns 3-tuple `(factor, notes, matched_ids)`
+- `matched_ids` = `[best["id"]]` — real DB id of matched doctrine
+- Synthetic `doc_refs` block removed from `decide()`
+- `doctrines_consulted` now contains real ids like `'doctrine_river_weather_flood'`
+
+**Part 2 — Wired failure feedback:**
+- `logger.increment_doctrine_failure(doctrine_id)` — increments failure_count,
+  recomputes decay_rate = failure_count / (episode_count + failure_count)
+- `_doctrine_factor()` applies decay: effective_confidence = confidence × (1 − decay_rate)
+- `DecisionEngine.record_battle_outcome(result, decisions_made)` — increments
+  failure_count on every doctrine consulted in a losing battle
+
+**Tests added: 14 new (318/318 total)**
+Integration test: 7/7 PASS (unchanged — doctrines_consulted now shows real IDs)
+
+### Candidate C — Player-General Relationship [NEXT 🔲]
+- Build player_general_relationship table (trust, betrayal, cooperation)
+- Schema described in ARCHITECTURE.md; no code exists yet
+- Requires live loop (now available) to generate relationship events
+
+### Candidate D — Logger Repository Split [NOT STARTED]
+- logger.py at ~885 lines; split into EpisodeRepository, ObservationRepository,
+  DoctrineRepository, ProfileRepository
+- Pure refactor; deferred until after B
+
+### Candidate E — Scout Mechanics [NOT STARTED]
+- Hidden armies, scout report success/failure, intel confidence
+- Touches Stage 1 files (battle.py, grid.py)
+- Deferred until C is done
 
 ---
 
@@ -66,10 +139,20 @@
 | 2026-06-25 | Multiplicative scoring (doctrine × player × situation) | Factors are conditional, not independent |
 | 2026-06-25 | decide() always returns full trace | Debugging + future feedback loop foundation |
 | 2026-06-25 | Intent strings not GeneralIntent enum in brain | No battle.py import needed |
+| 2026-06-28 | Integration test uses production DB | Real corpus doctrines needed for influence validation |
+| 2026-06-28 | brain_intent_fn closes over loop ref | Snapshot requires live BattleLoop state, not BattleState arg |
 
 ---
 
 ## Change Log
+
+### 2026-06-28 (Session 11 — Stage 3 Candidate A)
+- scripts/run_integration_test.py: 368 lines, standalone integration test
+- First live end-to-end run: simulator → brain → decision → battle → logging
+- W009 discovered and logged: doctrines_consulted shows synthetic IDs
+- KNOWN_ISSUES.md: W009 added, format cleaned
+- PROGRESS.md: Stage 3 section added, Candidate A marked complete
+- SESSION_HANDOFF.md: updated for Candidate B start
 
 ### 2026-06-27 (Handoff — state files updated)
 - CLAUDE_BRIEFING.md fully rewritten for Stage 2 complete state

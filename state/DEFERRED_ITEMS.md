@@ -18,6 +18,29 @@ Each item has:
 
 ---
 
+### D001 — Doctrine failure_count and decay_rate wiring
+**Status: OPEN — Stage 3 Candidate B (NOT YET BUILT)**
+**NOTE:** This item was pre-written in anticipation of Candidate B with a
+completion tick that does not reflect reality. Candidate B has not been
+implemented. The feedback loop described here is exactly what Candidate B
+must build. Do not treat this as done.
+**Prerequisite:** Fix W009 first — `doctrines_consulted` must return real
+doctrine IDs before failure_count can be incremented on the correct row.
+**What to build (Candidate B, Part 1 — fix W009):**
+- decision_engine.py: `_doctrine_factor()` returns the matched doctrine's real
+  `id` field from the DB, not a synthetic key string.
+- decide() collects those real IDs into `doctrines_consulted`.
+**What to build (Candidate B, Part 2 — feedback loop):**
+- logger.py: `increment_doctrine_failure(doctrine_id: str) -> None` — increments
+  failure_count, recomputes decay_rate = failure_count / (episode_count + failure_count)
+- decision_engine.py: `_doctrine_factor()` applies decay at read time:
+  effective_confidence = confidence × (1 − decay_rate)
+- decision_engine.py: `record_battle_outcome(result, decisions_made)` — after a
+  losing battle, increments failure_count on every doctrine in doctrines_consulted.
+**Target test count:** ~14 new tests, reaching 318/318 total.
+
+---
+
 ### D002 — Full confidence decay (time-based staleness not yet implemented)
 **Deferred from:** Architecture design
 **Partially done:** decay_rate is computed and applied in _doctrine_factor() as
@@ -124,7 +147,7 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 ### D014 — Logger.py repository split
 **Deferred from:** Design concern raised in ChatGPT review
 **Current state:** logger.py is ~885 lines — PAST the 800-line trigger threshold.
-**Status:** READY TO ADDRESS — trigger has been hit
+**Status:** TRIGGER HIT — DEFERRED UNTIL AFTER CANDIDATE C (do not start yet)
 **When to address:** Immediately after Candidate C (player_general_relationship),
   before D010 (NN predictor) adds more logger methods
 **What to do:**
@@ -145,9 +168,21 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 **Deferred from:** KNOWN_ISSUES W003 (scoring weights are untested heuristics)
 **Why deferred:** Cannot calibrate without live decision data.
 **When to address:** After 1000 live decisions have been logged in run_integration_test
+**Open architectural decision (resolve when D017 is activated):**
+  Two storage options for decision logs:
+  Option A — JSONL file (logs/decisions.jsonl): simple, text-based, easy to grep
+    and inspect. No schema changes. Risk: not queryable across battles without
+    parsing.
+  Option B — New `decisions` table in general_brain.db: fully queryable, joins
+    with episodes table, consistent with existing persistence layer. Risk: logger.py
+    grows further before D014 split.
+  Recommended: decide at D017 activation time based on how many battles have
+  been run and whether cross-battle aggregation is needed immediately.
 **What to do:**
-- Add decision logging to run_integration_test.py: after each battle, write every
-  decide() output (with all raw factors) to a JSONL file: logs/decisions.jsonl
+- Add decision logging to run_integration_test.py: after each battle, persist
+  every decide() output (with all raw factors) using whichever format is chosen.
+  Note: the per-turn trace already exists in decide() output — the missing piece
+  is persistence across runs, not the trace itself.
 - After 1000 decisions, analyse:
   Which intents are chosen most/least often?
   Which factors dominate (always near 1.5 or always near 0.5)?
@@ -317,22 +352,6 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 ---
 
 ## Completed Deferred Items
-
----
-
-### D001 — Doctrine failure_count and decay_rate wiring ✅
-**Completed:** 2026-06-29 (Stage 3 Candidate B)
-**What was built:**
-- logger.py: `increment_doctrine_failure(doctrine_id)` — increments failure_count,
-  recomputes decay_rate = failure_count / (episode_count + failure_count)
-- decision_engine.py: `_doctrine_factor()` applies decay:
-  effective_confidence = confidence × (1 − decay_rate)
-- decision_engine.py: `record_battle_outcome(result, decisions_made)` — increments
-  failure_count on every doctrine consulted in a losing battle
-- 14 new tests added (318/318 total)
-**Deviations from original plan:** Confidence recomputation formula changed from
-  episode_count / (episode_count + failure_count) to applying decay_rate directly.
-  decay_rate is now a stored field, not computed on read.
 
 ---
 

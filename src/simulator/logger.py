@@ -728,6 +728,39 @@ class EpisodeLogger:
             result.append(d)
         return result
 
+    def increment_doctrine_failure(self, doctrine_id: str) -> bool:
+        """
+        Increment failure_count for a doctrine and recompute decay_rate.
+
+        Called by DecisionEngine.record_battle_outcome() when a doctrine-backed
+        decision was made in a battle the General lost.
+
+        decay_rate = failure_count / (episode_count + failure_count)
+        This means: a doctrine seen 100 times with 10 failures → decay_rate 0.091
+        Applied in _doctrine_factor() as: effective_confidence = confidence * (1 - decay_rate)
+
+        Returns True if the doctrine was found and updated, False otherwise.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT failure_count, episode_count FROM doctrines WHERE id = ?",
+            (doctrine_id,),
+        ).fetchone()
+
+        if not row:
+            return False
+
+        new_failure = row["failure_count"] + 1
+        total       = row["episode_count"] + new_failure
+        new_decay   = round(new_failure / max(1, total), 6)
+
+        conn.execute(
+            "UPDATE doctrines SET failure_count = ?, decay_rate = ? WHERE id = ?",
+            (new_failure, new_decay, doctrine_id),
+        )
+        conn.commit()
+        return True
+
     # ------------------------------------------------------------------
     # Player profiles (written by PlayerProfiler)
     # ------------------------------------------------------------------

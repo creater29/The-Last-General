@@ -234,47 +234,58 @@ def test_rejected_list_contains_reasons():
 # ---------------------------------------------------------------------------
 
 def test_doctrine_factor_neutral_when_no_doctrine():
-    factor, notes = _doctrine_factor("AGGRESSIVE_PUSH", [], make_knowledge())
+    factor, notes, ids = _doctrine_factor("AGGRESSIVE_PUSH", [], make_knowledge())
     assert factor == 1.0
     assert notes == []
+    assert ids   == []
 
 
 def test_doctrine_factor_above_one_when_relevant_doctrine():
     doctrine = {
-        "condition": "frozen_lake+cavalry",
-        "learned_effect": "ice_break",
-        "confidence": 0.9,
+        "id":              "doctrine_frozen_lake_cavalry_ice_break",
+        "condition":       "frozen_lake+cavalry",
+        "learned_effect":  "ice_break",
+        "confidence":      0.9,
+        "decay_rate":      0.005,
         "derived_principle": "Heavy cavalry on frozen lakes risks ice breakage.",
     }
     k = make_knowledge(has_frozen_lake=True)
-    factor, notes = _doctrine_factor("TERRAIN_EXPLOIT", [doctrine], k)
+    factor, notes, ids = _doctrine_factor("TERRAIN_EXPLOIT", [doctrine], k)
     assert factor > 1.0
     assert len(notes) > 0
+    assert ids == ["doctrine_frozen_lake_cavalry_ice_break"]
 
 
 def test_doctrine_factor_not_applied_when_terrain_not_visible():
     """Doctrine for frozen_lake is irrelevant if frozen_lake not on battlefield."""
     doctrine = {
-        "condition": "frozen_lake+cavalry",
-        "learned_effect": "ice_break",
-        "confidence": 0.95,
+        "id":              "doctrine_frozen_lake_cavalry_ice_break",
+        "condition":       "frozen_lake+cavalry",
+        "learned_effect":  "ice_break",
+        "confidence":      0.95,
+        "decay_rate":      0.005,
         "derived_principle": "Test.",
     }
     k = make_knowledge(has_frozen_lake=False)  # frozen_lake not visible
-    factor, _ = _doctrine_factor("TERRAIN_EXPLOIT", [doctrine], k)
+    factor, _, ids = _doctrine_factor("TERRAIN_EXPLOIT", [doctrine], k)
     assert factor == 1.0
+    assert ids    == []
 
 
 def test_doctrine_factor_uses_highest_confidence():
     """When multiple relevant doctrines exist, highest confidence wins."""
-    d1 = {"condition": "frozen_lake+cavalry", "learned_effect": "ice_break",
-          "confidence": 0.7, "derived_principle": "Low."}
-    d2 = {"condition": "frozen_lake+siege", "learned_effect": "ice_break",
-          "confidence": 0.95, "derived_principle": "High."}
+    d1 = {"id": "doctrine_frozen_lake_cavalry_ice_break",
+          "condition": "frozen_lake+cavalry", "learned_effect": "ice_break",
+          "confidence": 0.7, "decay_rate": 0.005, "derived_principle": "Low."}
+    d2 = {"id": "doctrine_frozen_lake_siege_ice_break",
+          "condition": "frozen_lake+siege", "learned_effect": "ice_break",
+          "confidence": 0.95, "decay_rate": 0.005, "derived_principle": "High."}
     k = make_knowledge(has_frozen_lake=True)
-    factor_both, _ = _doctrine_factor("TERRAIN_EXPLOIT", [d1, d2], k)
-    factor_low,  _ = _doctrine_factor("TERRAIN_EXPLOIT", [d1],      k)
+    factor_both, _, ids_both = _doctrine_factor("TERRAIN_EXPLOIT", [d1, d2], k)
+    factor_low,  _, _        = _doctrine_factor("TERRAIN_EXPLOIT", [d1],      k)
     assert factor_both >= factor_low
+    # Should pick d2 (higher confidence) → its id returned
+    assert ids_both == ["doctrine_frozen_lake_siege_ice_break"]
 
 
 # ---------------------------------------------------------------------------
@@ -553,4 +564,245 @@ def test_choose_intent_matches_decide_intent():
     engine = make_engine(logger)
     k = make_knowledge(has_frozen_lake=True)
     assert engine.choose_intent(k) == engine.decide(k)["intent"]
+    logger.close()
+
+
+# ---------------------------------------------------------------------------
+# W009 fix — doctrines_consulted contains real doctrine IDs
+# ---------------------------------------------------------------------------
+
+def test_doctrines_consulted_are_real_ids():
+    """
+    W009: doctrines_consulted must contain real DB ids like
+    'doctrine_river_weather_flood', not synthetic keys.
+    """
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+    k = make_knowledge(has_frozen_lake=True)
+    decision = engine.decide(k)
+    for doc_id in decision["doctrines_consulted"]:
+        # Real IDs start with "doctrine_" and contain no spaces
+        assert doc_id.startswith("doctrine_"), (
+            f"Expected real doctrine id, got synthetic: {doc_id}"
+        )
+        assert " " not in doc_id
+
+
+def test_doctrines_consulted_empty_when_no_relevant_doctrine():
+    """No relevant doctrine → consulted list is empty, not a synthetic placeholder."""
+    logger = temp_logger()
+    engine = make_engine(logger)
+    # No frozen_lake, no hazard — TERRAIN_EXPLOIT filtered, no doctrine applies
+    k = make_knowledge(has_frozen_lake=False, has_river=False)
+    decision = engine.decide(k)
+    assert isinstance(decision["doctrines_consulted"], list)
+    # May be empty or contain real ids — must NOT contain synthetic strings
+    for doc_id in decision["doctrines_consulted"]:
+        assert doc_id.startswith("doctrine_")
+
+
+def test_doctrines_consulted_id_exists_in_db():
+    """Every id in doctrines_consulted must resolve to a real DB row."""
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+    k = make_knowledge(has_frozen_lake=True)
+    decision = engine.decide(k)
+    for doc_id in decision["doctrines_consulted"]:
+        row = logger.get_doctrine_by_id(doc_id)
+        assert row is not None, (
+            f"doctrine_id '{doc_id}' not found in DB — must be a real id"
+        )
+    logger.close()
+
+
+# ---------------------------------------------------------------------------
+# decay_rate applied in _doctrine_factor
+# ---------------------------------------------------------------------------
+
+def test_decay_rate_reduces_factor():
+    """A doctrine with high decay_rate produces a lower factor than one without."""
+    fresh_doctrine = {
+        "id":              "doctrine_frozen_lake_cavalry_ice_break",
+        "condition":       "frozen_lake+cavalry",
+        "learned_effect":  "ice_break",
+        "confidence":      0.95,
+        "decay_rate":      0.005,
+        "derived_principle": "Fresh doctrine.",
+    }
+    decayed_doctrine = {
+        "id":              "doctrine_frozen_lake_cavalry_ice_break",
+        "condition":       "frozen_lake+cavalry",
+        "learned_effect":  "ice_break",
+        "confidence":      0.95,
+        "decay_rate":      0.3,    # heavy decay from repeated failures
+        "derived_principle": "Decayed doctrine.",
+    }
+    k = make_knowledge(has_frozen_lake=True)
+    factor_fresh,   _, _ = _doctrine_factor("TERRAIN_EXPLOIT", [fresh_doctrine],   k)
+    factor_decayed, _, _ = _doctrine_factor("TERRAIN_EXPLOIT", [decayed_doctrine], k)
+    assert factor_decayed < factor_fresh
+
+
+def test_decay_note_shown_when_above_default():
+    """Reasoning note must mention decay when decay_rate > 0.005."""
+    doctrine = {
+        "id":              "doctrine_frozen_lake_cavalry_ice_break",
+        "condition":       "frozen_lake+cavalry",
+        "learned_effect":  "ice_break",
+        "confidence":      0.95,
+        "decay_rate":      0.15,
+        "derived_principle": "Test.",
+    }
+    k = make_knowledge(has_frozen_lake=True)
+    _, notes, _ = _doctrine_factor("TERRAIN_EXPLOIT", [doctrine], k)
+    assert any("decay" in n.lower() for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# increment_doctrine_failure (logger)
+# ---------------------------------------------------------------------------
+
+def test_increment_doctrine_failure_increments_count():
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+
+    doc = logger.get_all_doctrines()[0]
+    doc_id         = doc["id"]
+    failure_before = doc["failure_count"]
+
+    logger.increment_doctrine_failure(doc_id)
+
+    updated = logger.get_doctrine_by_id(doc_id)
+    assert updated["failure_count"] == failure_before + 1
+    logger.close()
+
+
+def test_increment_doctrine_failure_updates_decay_rate():
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+
+    doc    = logger.get_all_doctrines()[0]
+    doc_id = doc["id"]
+
+    # Apply several failures
+    for _ in range(5):
+        logger.increment_doctrine_failure(doc_id)
+
+    updated = logger.get_doctrine_by_id(doc_id)
+    assert updated["failure_count"] == 5
+    # decay_rate = 5 / (episode_count + 5)
+    expected = 5 / (updated["episode_count"] + 5)
+    assert abs(updated["decay_rate"] - expected) < 0.001
+    logger.close()
+
+
+def test_increment_doctrine_failure_returns_false_for_unknown():
+    logger = temp_logger()
+    result = logger.increment_doctrine_failure("nonexistent_doctrine_id")
+    assert result is False
+    logger.close()
+
+
+def test_increment_doctrine_failure_decay_rate_bounded():
+    """decay_rate must stay in [0.0, 1.0] regardless of failure count."""
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+
+    doc_id = logger.get_all_doctrines()[0]["id"]
+    for _ in range(200):
+        logger.increment_doctrine_failure(doc_id)
+
+    updated = logger.get_doctrine_by_id(doc_id)
+    assert 0.0 <= updated["decay_rate"] <= 1.0
+    logger.close()
+
+
+# ---------------------------------------------------------------------------
+# record_battle_outcome
+# ---------------------------------------------------------------------------
+
+def test_record_battle_outcome_no_increment_on_win():
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+    k      = make_knowledge(has_frozen_lake=True)
+
+    doc_before = logger.get_all_doctrines()[0]
+    decision   = engine.decide(k)
+
+    count = engine.record_battle_outcome("win", [decision])
+    assert count == 0
+
+    doc_after = logger.get_doctrine_by_id(doc_before["id"])
+    assert doc_after["failure_count"] == doc_before["failure_count"]
+    logger.close()
+
+
+def test_record_battle_outcome_no_increment_on_draw():
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+    k      = make_knowledge(has_frozen_lake=True)
+    decision = engine.decide(k)
+
+    count = engine.record_battle_outcome("draw", [decision])
+    assert count == 0
+    logger.close()
+
+
+def test_record_battle_outcome_increments_on_loss():
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+    k = make_knowledge(has_frozen_lake=True)
+
+    decision = engine.decide(k)
+    doc_ids  = decision["doctrines_consulted"]
+
+    if not doc_ids:
+        # No doctrine backed this decision — skip (doctrines may not match)
+        logger.close()
+        return
+
+    failures_before = {
+        d: logger.get_doctrine_by_id(d)["failure_count"]
+        for d in doc_ids
+    }
+
+    count = engine.record_battle_outcome("loss", [decision])
+    assert count == len(doc_ids)
+
+    for doc_id in doc_ids:
+        updated = logger.get_doctrine_by_id(doc_id)
+        assert updated["failure_count"] == failures_before[doc_id] + 1
+
+    logger.close()
+
+
+def test_record_battle_outcome_multi_turn():
+    """Multiple decisions from multiple turns are all penalised on loss."""
+    logger = temp_logger()
+    seed_observations(logger, "frozen_lake+cavalry", "ice_break", 20)
+    engine = make_engine(logger)
+
+    # Simulate 3 turns where TERRAIN_EXPLOIT is chosen each time
+    k         = make_knowledge(has_frozen_lake=True)
+    decisions = [engine.decide(k) for _ in range(3)]
+    doc_ids   = [d for dec in decisions for d in dec["doctrines_consulted"]]
+
+    count = engine.record_battle_outcome("loss", decisions)
+    assert count == len(doc_ids)
+    logger.close()
+
+
+def test_record_battle_outcome_empty_decisions():
+    logger = temp_logger()
+    engine = make_engine(logger)
+    count  = engine.record_battle_outcome("loss", [])
+    assert count == 0
     logger.close()

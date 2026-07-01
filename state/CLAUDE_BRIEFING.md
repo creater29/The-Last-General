@@ -86,7 +86,7 @@ Before writing any code in a new session:
 
 ---
 
-## Project Structure (Current — Stage 2 Complete)
+## Project Structure (Current — Stage 3 In Progress)
 
 ```
 ~/Projects/general_brain/
@@ -103,7 +103,7 @@ Before writing any code in a new session:
 │   │   ├── physics.py           ← terrain interaction engine (23 tests)
 │   │   ├── battle.py            ← battle loop + to_brain_snapshot() (26 tests)
 │   │   ├── logger.py            ← SQLite persistence layer (31 tests)
-│   │   ├── snapshot.py          ← CommanderKnowledge dataclass (NEW — 20 tests)
+│   │   ├── snapshot.py          ← CommanderKnowledge dataclass (20 tests)
 │   │   └── training_profiles.py ← corpus generation profiles (22 tests)
 │   └── brain/                   ← Stage 2 COMPLETE
 │       ├── world_model.py       ← terrain belief system (30 tests)
@@ -111,7 +111,8 @@ Before writing any code in a new session:
 │       ├── player_profiler.py   ← per-player behaviour profiles (35 tests)
 │       └── decision_engine.py   ← hierarchical reasoning pipeline (43 tests)
 ├── scripts/
-│   └── generate_corpus.py       ← CLI: targeted batch generation
+│   ├── generate_corpus.py       ← CLI: targeted batch generation
+│   └── run_integration_test.py  ← Stage 3A: live pipeline test (Candidate A ✅)
 ├── data/
 │   └── episodes/
 │       └── general_brain.db     ← SQLite database (2000+ episodes)
@@ -200,7 +201,8 @@ class CommanderKnowledge:
     "reasoning":           List[str],  # why this intent was chosen
     "rejected":            List[str],  # eliminated intents + reasons
     "alternatives":        List[tuple],# [(intent, confidence)] top 2 runners-up
-    "doctrines_consulted": List[str],  # doctrine ids that influenced decision
+    "doctrines_consulted": List[str],  # W009: currently synthetic IDs, not real DB ids
+                                       # must fix before Candidate B (feedback loop)
     "profile_used":        bool,       # True if player profile was available
 }
 ```
