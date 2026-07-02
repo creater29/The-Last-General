@@ -51,6 +51,55 @@ CRITICAL SEPARATION:
 
 ---
 
+## Three Memory Systems — Orthogonality Rule (Permanent)
+
+The General has three independent memory systems. Each answers a different question.
+They must never answer each other's questions.
+
+**Doctrine Memory** — "What works on the battlefield?"
+  Military knowledge about terrain, weather, unit interactions.
+  Examples: rivers flood under heavy rain, cavalry risk ice-break on frozen lakes.
+  Encoded as: anonymous generalizable principles (no player_id).
+
+**Player Profile** — "How does this commander usually fight?"
+  Tactical understanding of a specific opponent's behaviour.
+  Examples: aggressive tendency 0.72, prefers cavalry flanks, adapts quickly.
+  Encoded as: per-player statistical profiles (server_id + player_id).
+
+**Relationship Memory** — "What is my history with this commander?"
+  Psychological state toward a specific opponent.
+  Examples: trust level, betrayal count, willingness to commit or retreat.
+  Encoded as: per-player relational state (server_id + player_id).
+
+**The rule:**
+These three systems must remain orthogonal.
+
+  Doctrine must never encode player behaviour.
+  Player Profile must never encode psychological history.
+  Relationship must never encode battlefield tactics.
+
+Relationship may influence only: risk tolerance, caution threshold, confidence
+adjustment, willingness to retreat or regroup.
+
+Relationship must NEVER directly score specific tactics:
+AMBUSH, FLANK, SIEGE, CAVALRY_CHARGE, TERRAIN_EXPLOIT — those belong to
+doctrines and player profiling.
+
+**Why this matters — the five-year explanation test:**
+A decision should be fully explainable by citing exactly one contribution
+from each system:
+  "Forest → doctrine says ambush works here (military knowledge)
+   Player often overextends left (tactical read)
+   Low trust → General becomes cautious (psychological posture)
+   → AMBUSH"
+
+If relationship is producing tactic scores, the second and third lines
+merge — and the explanation collapses. Any proposal that causes one system
+to encode another's responsibility requires explicit architectural justification
+before it can be accepted.
+
+---
+
 ## Core Data Structures
 
 ### Cell

@@ -85,14 +85,49 @@ Trust level bounds: clamp to [-1.0, 1.0].
 
 ### How DecisionEngine uses it
 
-After `_player_factor()`, a `_relationship_factor()` call applies trust:
+After `_player_factor()`, a `_relationship_factor()` call adjusts the General's
+psychological posture toward this opponent — never specific battlefield tactics.
+
+**Architectural Rule (permanent):**
+Relationship memory modifies the General's *attitude toward the opponent*,
+never the *specific battlefield tactic*. Tactical selection remains the
+responsibility of doctrines, player profiling, and situation evaluation.
+
+What relationship MAY influence:
+- Risk tolerance (willingness to commit to decisive action)
+- Caution threshold (how readily the General holds back)
+- Confidence adjustment (how much the General trusts his own read)
+- Willingness to retreat or regroup
+
+What relationship must NEVER directly score:
+- AMBUSH, FLANK, SIEGE, CAVALRY_CHARGE, TERRAIN_EXPLOIT
+  (those are tactical decisions owned by doctrines + player profile)
+
+**Factor formulation:**
 ```python
-# trust > 0.5:  General is cautious — boosts DEFENSIVE_HOLD, reduces AGGRESSIVE_PUSH
-# trust < -0.5: General is wary   — boosts AMBUSH, reduces TERRAIN_EXPLOIT (predictable)
-# near 0:       neutral — factor = 1.0
+# trust > 0.5:  General is willing to commit — mild boost to decisive intents
+#               AGGRESSIVE_PUSH, TERRAIN_EXPLOIT, FLANKING_MANEUVER
+# trust < -0.5: General is wary — mild boost to cautious intents
+#               DEFENSIVE_HOLD, REGROUP
+# near 0:       factor = 1.0 (neutral — no posture adjustment)
 ```
 
-Factor range: [0.7, 1.3] — same scale as other factors.
+Factor range: [0.85, 1.15] — narrower than doctrine/player factors.
+Relationship is psychological background; it should not dominate tactical scoring.
+
+The signal is "how committed or cautious is the General feeling toward this
+opponent" — not "which specific maneuver does he choose."
+
+**Explanation trace this enables (five years from now):**
+```
+Why AMBUSH?
+  Situation: Forest
+  Doctrine:  Forest ambush successful (conf 0.93)  ← military knowledge
+  Player:    Often overextends left flank           ← tactical read
+  Relationship: Low trust → General is cautious     ← psychological posture
+  Decision: Ambush
+```
+Relationship confirmed caution; the other two systems chose the tactic.
 
 ### Files to touch
 1. `src/brain/relationship_manager.py` — new file (~120 lines)

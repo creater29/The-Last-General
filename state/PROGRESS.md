@@ -71,6 +71,8 @@ battle loop. First time simulator and brain ran together end-to-end.
 - [✓] Pipeline completed with 0 errors
 - [✓] Post-battle analysis pipeline executed
 
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
 **Observed behaviors (confirms correct design):**
 - Doctrines loaded: 5 with confidence 0.9872–1.0000
 - Weather-driven oscillation visible: TERRAIN_EXPLOIT (clear) → AMBUSH (fog) → TERRAIN_EXPLOIT
@@ -105,6 +107,8 @@ already fixed in source; resolved and verified as part of Candidate B.
 
 **Tests added: 14 (was 305 pre-written → 319 after schema fix test)**
 Integration test: 8/8 PASS (added feedback_loop_verified criterion)
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
 ### Candidate C — Player-General Relationship [NEXT 🔲]
 - Build player_general_relationship table (trust, betrayal, cooperation)
