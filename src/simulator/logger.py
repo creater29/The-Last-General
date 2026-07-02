@@ -136,7 +136,8 @@ class EpisodeLogger:
             );
 
             CREATE TABLE IF NOT EXISTS player_general_relationship (
-                player_id               TEXT PRIMARY KEY,
+                server_id               TEXT NOT NULL,
+                player_id               TEXT NOT NULL,
                 trust_level             REAL NOT NULL DEFAULT 0.0,
                 betrayal_count          INTEGER NOT NULL DEFAULT 0,
                 cooperation_count       INTEGER NOT NULL DEFAULT 0,
@@ -144,7 +145,8 @@ class EpisodeLogger:
                 known_deceptions        INTEGER NOT NULL DEFAULT 0,
                 predicted_next_intent   TEXT,
                 prediction_confidence   REAL NOT NULL DEFAULT 0.0,
-                notable_events          JSON NOT NULL DEFAULT '[]'
+                notable_events          JSON NOT NULL DEFAULT '[]',
+                PRIMARY KEY (server_id, player_id)
             );
 
             CREATE TABLE IF NOT EXISTS terrain_knowledge (
@@ -460,12 +462,17 @@ class EpisodeLogger:
     # Relationship record management
     # ------------------------------------------------------------------
 
-    def upsert_relationship(self, player_id: str, data: dict) -> None:
-        """Insert or update the General's relationship with a player."""
+    def upsert_relationship(self, server_id: str, player_id: str, data: dict) -> None:
+        """Insert or update the General's relationship with a player.
+
+        Uses composite key (server_id, player_id) — consistent with player_profiles.
+        Cross-server isolation: Steve on Server A and Steve on Server B are distinct.
+        """
         conn = self._get_conn()
         existing = conn.execute(
-            "SELECT player_id FROM player_general_relationship WHERE player_id = ?",
-            (player_id,),
+            "SELECT player_id FROM player_general_relationship "
+            "WHERE server_id = ? AND player_id = ?",
+            (server_id, player_id),
         ).fetchone()
 
         notable = json.dumps(data.get("notable_events", []))
@@ -481,7 +488,7 @@ class EpisodeLogger:
                     predicted_next_intent = ?,
                     prediction_confidence = ?,
                     notable_events = ?
-                WHERE player_id = ?
+                WHERE server_id = ? AND player_id = ?
                 """,
                 (
                     data.get("trust_level", 0.0),
@@ -492,6 +499,7 @@ class EpisodeLogger:
                     data.get("predicted_next_intent"),
                     data.get("prediction_confidence", 0.0),
                     notable,
+                    server_id,
                     player_id,
                 ),
             )
@@ -499,12 +507,13 @@ class EpisodeLogger:
             conn.execute(
                 """
                 INSERT INTO player_general_relationship
-                    (player_id, trust_level, betrayal_count, cooperation_count,
-                     times_attempted_capture, known_deceptions,
+                    (server_id, player_id, trust_level, betrayal_count,
+                     cooperation_count, times_attempted_capture, known_deceptions,
                      predicted_next_intent, prediction_confidence, notable_events)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    server_id,
                     player_id,
                     data.get("trust_level", 0.0),
                     data.get("betrayal_count", 0),
@@ -518,17 +527,65 @@ class EpisodeLogger:
             )
         conn.commit()
 
-    def get_relationship(self, player_id: str) -> Optional[dict]:
+    def get_relationship(self, server_id: str, player_id: str) -> Optional[dict]:
+        """Return the General's relationship record with a specific player.
+
+        Uses composite key (server_id, player_id) — consistent with player_profiles.
+        """
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT * FROM player_general_relationship WHERE player_id = ?",
-            (player_id,),
+            "SELECT * FROM player_general_relationship "
+            "WHERE server_id = ? AND player_id = ?",
+            (server_id, player_id),
         ).fetchone()
         if not row:
             return None
         result = dict(row)
         result["notable_events"] = json.loads(result["notable_events"])
         return result
+
+    def migrate_relationship_schema(self) -> None:
+        """
+        Migrate player_general_relationship from player_id-only PK to
+        composite (server_id, player_id) PK — consistent with player_profiles.
+
+        Safe to call on an empty table (no data to preserve).
+        Idempotent: if the table already has the correct schema this is a no-op.
+
+        Run once on the production DB after this code is deployed:
+            python3 -c "
+            import sys; sys.path.insert(0, 'src')
+            from simulator.logger import EpisodeLogger
+            EpisodeLogger().migrate_relationship_schema()
+            print('Done.')
+            "
+        """
+        conn = self._get_conn()
+        # Check if server_id column already exists
+        cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(player_general_relationship)"
+        ).fetchall()}
+        if "server_id" in cols:
+            return  # already migrated — no-op
+
+        # Drop and recreate: table is empty so no data loss
+        conn.execute("DROP TABLE IF EXISTS player_general_relationship")
+        conn.execute("""
+            CREATE TABLE player_general_relationship (
+                server_id               TEXT NOT NULL,
+                player_id               TEXT NOT NULL,
+                trust_level             REAL NOT NULL DEFAULT 0.0,
+                betrayal_count          INTEGER NOT NULL DEFAULT 0,
+                cooperation_count       INTEGER NOT NULL DEFAULT 0,
+                times_attempted_capture INTEGER NOT NULL DEFAULT 0,
+                known_deceptions        INTEGER NOT NULL DEFAULT 0,
+                predicted_next_intent   TEXT,
+                prediction_confidence   REAL NOT NULL DEFAULT 0.0,
+                notable_events          JSON NOT NULL DEFAULT '[]',
+                PRIMARY KEY (server_id, player_id)
+            )
+        """)
+        conn.commit()
 
     # ------------------------------------------------------------------
     # Stats / diagnostics

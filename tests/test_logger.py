@@ -308,8 +308,8 @@ def test_upsert_relationship_new():
         "prediction_confidence": 0.7,
         "notable_events": ["betrayed at age 3"],
     }
-    logger.upsert_relationship("arman", data)
-    rel = logger.get_relationship("arman")
+    logger.upsert_relationship("server_a", "arman", data)
+    rel = logger.get_relationship("server_a", "arman")
     assert rel is not None
     assert rel["trust_level"] == -0.5
     assert rel["betrayal_count"] == 2
@@ -318,20 +318,37 @@ def test_upsert_relationship_new():
 
 def test_upsert_relationship_updates():
     logger = temp_logger()
-    logger.upsert_relationship("arman", {"trust_level": 0.3, "betrayal_count": 0,
-        "cooperation_count": 1, "times_attempted_capture": 0,
-        "known_deceptions": 0, "notable_events": []})
-    logger.upsert_relationship("arman", {"trust_level": -0.8, "betrayal_count": 1,
-        "cooperation_count": 1, "times_attempted_capture": 0,
-        "known_deceptions": 1, "notable_events": []})
-    rel = logger.get_relationship("arman")
+    logger.upsert_relationship("server_a", "arman", {"trust_level": 0.3,
+        "betrayal_count": 0, "cooperation_count": 1,
+        "times_attempted_capture": 0, "known_deceptions": 0, "notable_events": []})
+    logger.upsert_relationship("server_a", "arman", {"trust_level": -0.8,
+        "betrayal_count": 1, "cooperation_count": 1,
+        "times_attempted_capture": 0, "known_deceptions": 1, "notable_events": []})
+    rel = logger.get_relationship("server_a", "arman")
     assert rel["trust_level"] == -0.8
     assert rel["betrayal_count"] == 1
     logger.close()
 
+def test_upsert_relationship_server_isolation():
+    """Same player_id on different servers must be independent records."""
+    logger = temp_logger()
+    logger.upsert_relationship("server_a", "arman", {"trust_level": 0.8,
+        "betrayal_count": 0, "cooperation_count": 5, "times_attempted_capture": 0,
+        "known_deceptions": 0, "notable_events": []})
+    logger.upsert_relationship("server_b", "arman", {"trust_level": -0.5,
+        "betrayal_count": 3, "cooperation_count": 0, "times_attempted_capture": 1,
+        "known_deceptions": 2, "notable_events": []})
+    rel_a = logger.get_relationship("server_a", "arman")
+    rel_b = logger.get_relationship("server_b", "arman")
+    assert rel_a["trust_level"] == 0.8
+    assert rel_b["trust_level"] == -0.5
+    assert rel_a["betrayal_count"] == 0
+    assert rel_b["betrayal_count"] == 3
+    logger.close()
+
 def test_unknown_relationship_returns_none():
     logger = temp_logger()
-    assert logger.get_relationship("nobody") is None
+    assert logger.get_relationship("server_a", "nobody") is None
     logger.close()
 
 

@@ -48,7 +48,8 @@ from brain.decision_engine import DecisionEngine, ALL_INTENTS
 
 SERVER_ID    = "integration_test_server"
 PLAYER_ID    = "integration_test_player"
-DEFAULT_SEED = 42
+DEFAULT_SEED    = 42
+FEEDBACK_SEED   = 9    # brain-driven loss — used for feedback loop verification
 BATTLE_AGE   = 300   # The General is ancient
 LINE         = "=" * 64
 
@@ -232,7 +233,7 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     state = loop.run(general_intent_fn=brain_intent_fn)
 
     log("")
-    log(f"[BATTLE] Concluded: {state.result.upper()} in {state.turns_played} turn(s)")
+    log(f"[BATTLE 1] Concluded: {state.result.upper()} in {state.turns_played} turn(s)")
 
     # -------------------------------------------------------------------
     # Step 8 — Post-battle: log episode + re-run analysis pipeline
@@ -250,47 +251,169 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     post_battle_ok = True  # reached this point without exception
 
     # -------------------------------------------------------------------
-    # Step 9 — Evaluate success criteria
+    # Step 9 — Feedback loop verification (seed=FEEDBACK_SEED → loss)
+    # -------------------------------------------------------------------
+    log(f"\n{LINE}")
+    log(f"[FEEDBACK] Running verification battle (seed={FEEDBACK_SEED}, expected: loss)...")
+    log(f"  This battle verifies record_battle_outcome() increments failure_count")
+    log(f"  on the correct doctrine rows after a brain-driven loss.")
+    log("")
+
+    feedback_ok        = False
+    feedback_details:  list[str] = []
+    increments_applied = 0
+
+    try:
+        # Snapshot doctrine state BEFORE the feedback battle
+        before_doctrines = {d["id"]: dict(d) for d in de.get_doctrines()}
+
+        fb_grid = Grid(40, 40, seed=FEEDBACK_SEED)
+        fb_general = [
+            make_unit(UnitType.CAVALRY,  "general", (8,  5)),
+            make_unit(UnitType.CAVALRY,  "general", (10, 5)),
+            make_unit(UnitType.INFANTRY, "general", (12, 5)),
+            make_unit(UnitType.ARCHER,   "general", (14, 5)),
+        ]
+        fb_player = [
+            make_unit(UnitType.INFANTRY, "player", (8,  35)),
+            make_unit(UnitType.INFANTRY, "player", (10, 35)),
+            make_unit(UnitType.CAVALRY,  "player", (12, 35)),
+            make_unit(UnitType.ARCHER,   "player", (14, 35)),
+        ]
+        fb_loop = BattleLoop(
+            grid          = fb_grid,
+            general_units = fb_general,
+            player_units  = fb_player,
+            player_id     = PLAYER_ID,
+            age           = BATTLE_AGE,
+            seed          = FEEDBACK_SEED,
+        )
+
+        fb_decisions: list[dict] = []
+        fb_errors:    list[str]  = []
+
+        def fb_intent_fn(state):
+            try:
+                knowledge = fb_loop.to_brain_snapshot(SERVER_ID, PLAYER_ID)
+                decision  = engine.decide(knowledge)
+                fb_decisions.append(decision)
+                if verbose:
+                    doc_mark = "●" if decision["doctrines_consulted"] else "○"
+                    print(
+                        f"  Turn {knowledge.turn:2d}  {decision['intent']:22s} "
+                        f"conf={decision['confidence']:.2f}  {doc_mark}"
+                    )
+                return GeneralIntent[decision["intent"]]
+            except Exception as exc:
+                fb_errors.append(str(exc))
+                return GeneralIntent.DEFENSIVE_HOLD
+
+        fb_state = fb_loop.run(general_intent_fn=fb_intent_fn)
+
+        log("")
+        log(f"  Result: {fb_state.result.upper()} in {fb_state.turns_played} turn(s)")
+
+        if fb_state.result != "loss":
+            feedback_details.append(
+                f"Expected loss with seed={FEEDBACK_SEED} but got {fb_state.result}. "
+                f"Try a different FEEDBACK_SEED."
+            )
+        else:
+            # Call record_battle_outcome() — the feedback loop
+            increments_applied = engine.record_battle_outcome(
+                fb_state.result, fb_decisions
+            )
+
+            # Snapshot doctrine state AFTER
+            after_doctrines = {d["id"]: dict(d) for d in de.get_doctrines()}
+
+            log(f"\n  BEFORE → AFTER  (failure_count | decay_rate):")
+            changed = 0
+            for doc_id, before in before_doctrines.items():
+                after = after_doctrines.get(doc_id, {})
+                fc_before = before.get("failure_count", 0)
+                fc_after  = after.get("failure_count",  0)
+                dr_before = before.get("decay_rate",    0.0)
+                dr_after  = after.get("decay_rate",     0.0)
+
+                if fc_after != fc_before:
+                    changed += 1
+                    log(
+                        f"  ✓ [{doc_id}]\n"
+                        f"    failure_count: {fc_before} → {fc_after}\n"
+                        f"    decay_rate:    {dr_before:.6f} → {dr_after:.6f}"
+                    )
+                else:
+                    log(f"  – [{doc_id}]  unchanged (not consulted in this battle)")
+
+            log(f"\n  Doctrines changed: {changed}")
+            log(f"  Increments applied by record_battle_outcome(): {increments_applied}")
+
+            feedback_ok = (
+                changed > 0
+                and increments_applied > 0
+                and len(fb_errors) == 0
+            )
+            if not feedback_ok:
+                if changed == 0:
+                    feedback_details.append("No doctrine failure_counts changed.")
+                if increments_applied == 0:
+                    feedback_details.append("record_battle_outcome() returned 0 increments.")
+                if fb_errors:
+                    feedback_details.extend(fb_errors)
+
+    except Exception as exc:
+        feedback_details.append(f"{type(exc).__name__}: {exc}")
+        feedback_ok = False
+
+    # -------------------------------------------------------------------
+    # Step 10 — Evaluate all success criteria
     # -------------------------------------------------------------------
     criteria = {
-        "pre_battle_priming":  pre_battle_ok,
-        "doctrine_influence":  total_doctrines_consulted > 0,
-        "every_turn_decided":  len(turn_decisions) == state.turns_played,
-        "intent_mapping_ok":   intent_mapping_ok,
-        "trace_complete":      all("reasoning" in d for d in turn_decisions),
-        "no_pipeline_errors":  len(pipeline_errors) == 0,
-        "post_battle_ran":     post_battle_ok,
+        "pre_battle_priming":    pre_battle_ok,
+        "doctrine_influence":    total_doctrines_consulted > 0,
+        "every_turn_decided":    len(turn_decisions) == state.turns_played,
+        "intent_mapping_ok":     intent_mapping_ok,
+        "trace_complete":        all("reasoning" in d for d in turn_decisions),
+        "no_pipeline_errors":    len(pipeline_errors) == 0,
+        "post_battle_ran":       post_battle_ok,
+        "feedback_loop_verified": feedback_ok,
     }
     all_passed = all(criteria.values())
 
     # -------------------------------------------------------------------
-    # Step 10 — Summary
+    # Step 11 — Summary
     # -------------------------------------------------------------------
     log(f"\n{LINE}")
     log("INTEGRATION TEST SUMMARY")
     log(LINE)
-    log(f"  Battle result:              {state.result.upper()}")
+    log(f"  Battle 1 result:            {state.result.upper()}")
     log(f"  Turns played:               {state.turns_played}")
     log(f"  Decisions made:             {len(turn_decisions)}")
     log(f"  Rejected intents (total):   {total_rejected}")
     log(f"  Doctrines consulted:        {total_doctrines_consulted}")
     log(f"  Turns profile was used:     {profiles_used_count}")
     log(f"  Pipeline errors:            {len(pipeline_errors)}")
+    log(f"  Feedback increments:        {increments_applied}")
 
     criterion_labels = {
-        "pre_battle_priming":  "Pre-battle knowledge priming executed",
-        "doctrine_influence":  (
+        "pre_battle_priming":    "Pre-battle knowledge priming executed",
+        "doctrine_influence":    (
             f"Doctrine influence detected "
             f"({total_doctrines_consulted} consultations across battle)"
         ),
-        "every_turn_decided":  (
+        "every_turn_decided":    (
             f"Decision logged every turn "
             f"({len(turn_decisions)}/{state.turns_played})"
         ),
-        "intent_mapping_ok":   "All 8 intent strings → GeneralIntent enum verified",
-        "trace_complete":      "Decision trace complete on all turns",
-        "no_pipeline_errors":  "Pipeline completed with 0 errors",
-        "post_battle_ran":     "Post-battle analysis pipeline executed",
+        "intent_mapping_ok":     "All 8 intent strings → GeneralIntent enum verified",
+        "trace_complete":        "Decision trace complete on all turns",
+        "no_pipeline_errors":    "Pipeline completed with 0 errors",
+        "post_battle_ran":       "Post-battle analysis pipeline executed",
+        "feedback_loop_verified": (
+            f"Doctrine DB updated after loss "
+            f"({increments_applied} failure_count increments applied)"
+        ),
     }
 
     log("\nSUCCESS CRITERIA:")
@@ -307,6 +430,11 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
         log("\nINTENT MAPPING ERRORS:")
         for err in mapping_errors:
             log(f"  {err}")
+
+    if feedback_details:
+        log("\nFEEDBACK ERRORS:")
+        for detail in feedback_details:
+            log(f"  {detail}")
 
     # Sample traces — turn 1 and midpoint
     if turn_decisions:

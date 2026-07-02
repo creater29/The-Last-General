@@ -1,8 +1,8 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
-## Last Updated: 2026-06-29
-## Test Count: 318/318
+## Last Updated: 2026-06-28
+## Test Count: 319/319
 
 ---
 
@@ -77,29 +77,34 @@ battle loop. First time simulator and brain ran together end-to-end.
 - Situation factor confirmed working: fog × AMBUSH = ×1.4 factor beats frozen_lake doctrine
 - Decision trace readable and inspectable per turn
 
-**Known defect exposed (W009 — see KNOWN_ISSUES.md):**
-- doctrines_consulted shows synthetic IDs, not real doctrine IDs from DB
-- Example: `['doctrine_frozen_lake_frozen_lake_river']` instead of `'doctrine_river_weather_flood'`
-- Must fix before Candidate B (feedback loop needs real IDs to increment failure_count)
+**Note:** W009 (synthetic doctrine IDs) was discovered during this run but was
+already fixed in source; resolved and verified as part of Candidate B.
 
 ### Candidate B — Doctrine Feedback Loop [COMPLETE ✅]
-**Completed:** 2026-06-29
+**Completed:** 2026-06-28
 
-**Part 1 — Fixed W009:**
-- `_doctrine_factor()` returns 3-tuple `(factor, notes, matched_ids)`
-- `matched_ids` = `[best["id"]]` — real DB id of matched doctrine
-- Synthetic `doc_refs` block removed from `decide()`
-- `doctrines_consulted` now contains real ids like `'doctrine_river_weather_flood'`
+**Discovered via audit (pre-written alongside implementation):**
+- decision_engine.py: `_doctrine_factor()` returns real doctrine `id` from DB (W009 fix)
+- decision_engine.py: effective_confidence = confidence × (1 − decay_rate) applied at read time
+- logger.py: `increment_doctrine_failure(doctrine_id)` — increments failure_count, recomputes decay_rate
+- decision_engine.py: `record_battle_outcome(result, decisions_made)` — fires on loss only
+- 14 tests (319/319 total)
 
-**Part 2 — Wired failure feedback:**
-- `logger.increment_doctrine_failure(doctrine_id)` — increments failure_count,
-  recomputes decay_rate = failure_count / (episode_count + failure_count)
-- `_doctrine_factor()` applies decay: effective_confidence = confidence × (1 − decay_rate)
-- `DecisionEngine.record_battle_outcome(result, decisions_made)` — increments
-  failure_count on every doctrine consulted in a losing battle
+**Schema fix (this session — not pre-written):**
+- `player_general_relationship` table: added `server_id NOT NULL`, composite PK `(server_id, player_id)`
+- `upsert_relationship(server_id, player_id, data)` and `get_relationship(server_id, player_id)` updated
+- `migrate_relationship_schema()` added and run on production DB
+- Server isolation test added → 319/319
 
-**Tests added: 14 new (318/318 total)**
-Integration test: 7/7 PASS (unchanged — doctrines_consulted now shows real IDs)
+**Verification (run_integration_test.py — 8/8 criteria PASS):**
+- Battle 1 (seed=42): WIN in 30 turns, 30 doctrine consultations ✓
+- Battle 2 (seed=9):  LOSS in 30 turns, record_battle_outcome() applied 30 increments ✓
+- doctrine_forest_cavalry_tree_fall: failure_count 0→24, decay_rate 0.005000→0.001175 ✓
+- doctrine_river_weather_flood:      failure_count 0→6,  decay_rate 0.005000→0.000051 ✓
+- Unconsulted doctrines (wall, frozen_lake_*) unchanged ✓
+
+**Tests added: 14 (was 305 pre-written → 319 after schema fix test)**
+Integration test: 8/8 PASS (added feedback_loop_verified criterion)
 
 ### Candidate C — Player-General Relationship [NEXT 🔲]
 - Build player_general_relationship table (trust, betrayal, cooperation)

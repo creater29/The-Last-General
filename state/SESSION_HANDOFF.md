@@ -1,89 +1,62 @@
 # Session Handoff
 
-## Date: 2026-06-29
+## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 318/318
+## Tests: 319/319
 ## Handoff to: next session
 
 ---
 
 ## What was completed this session
 
-**Stage 3 Candidate B — Doctrine Feedback Loop** is complete.
+**Stage 3 Candidates A and B are both complete and verified.**
 
-### Part 1 — W009 Fixed (decision_engine.py)
+### Candidate A (recap)
+`scripts/run_integration_test.py` wires the full pipeline:
+  simulator → snapshot → brain → decision → battle → logging
 
-`_doctrine_factor()` now returns a 3-tuple `(factor, notes, matched_ids)`.
-`matched_ids` contains the real doctrine DB id (e.g. `'doctrine_river_weather_flood'`).
-The synthetic `doc_refs` block in `decide()` was removed and replaced with
-`doc_refs[intent] = d_ids` collected directly from `_doctrine_factor()`.
+### Candidate B — fully verified this session
+Work done:
+1. **Audit** revealed Candidate B implementation was pre-written (like D001).
+   Code existed for W009 fix, `increment_doctrine_failure()`, `record_battle_outcome()`,
+   and `_doctrine_factor()` decay application. 14 tests already in place.
 
-`doctrines_consulted` in every `decide()` output now contains real IDs
-that resolve to actual rows in the doctrines table.
+2. **Schema fix** (not pre-written — done this session):
+   `player_general_relationship` table lacked `server_id`. Fixed to composite
+   `PRIMARY KEY (server_id, player_id)` — consistent with `player_profiles`.
+   `upsert_relationship()` and `get_relationship()` updated to take `server_id`.
+   `migrate_relationship_schema()` added and run on production DB.
+   Server isolation test added → 319/319.
 
-Verified: integration test Turn 1 trace shows `['doctrine_river_weather_flood']`.
+3. **Integration test wiring** — `record_battle_outcome()` added to
+   `run_integration_test.py` as a second verification battle (seed=9, expected loss).
+   Before/after doctrine DB state printed with exact field values.
 
-### Part 2 — Failure feedback wired
+4. **Verified 8/8 criteria PASS:**
+   - Battle 1 (seed=42): WIN, 30 doctrine consultations
+   - Battle 2 (seed=9):  LOSS, 30 increments applied by record_battle_outcome()
+   - doctrine_forest_cavalry_tree_fall: failure_count 0→24, decay_rate 0.005000→0.001175
+   - doctrine_river_weather_flood:      failure_count 0→6,  decay_rate 0.005000→0.000051
+   - Unconsulted doctrines unchanged (selectivity confirmed)
 
-**logger.py** — `increment_doctrine_failure(doctrine_id) -> bool`:
-- Increments `failure_count` on the doctrine row
-- Recomputes `decay_rate = failure_count / (episode_count + failure_count)`
-- Returns True if found+updated, False if doctrine_id not in DB
-
-**decision_engine.py** — `_doctrine_factor()` now applies decay:
-- `effective_confidence = confidence * (1.0 - decay_rate)`
-- Factor computed from `effective_confidence` not raw `confidence`
-- Reasoning note shows decay value when `decay_rate > 0.005`
-
-**decision_engine.py** — `record_battle_outcome(result, decisions_made) -> int`:
-- Only acts on `result == "loss"`
-- Calls `increment_doctrine_failure()` for every real doctrine id in decisions
-- Returns count of increments applied
-
-### Test additions
-- 14 new tests (4 W009, 4 decay_rate, 4 logger, 2+ record_battle_outcome)
-- All 4 existing `_doctrine_factor` tests updated to unpack 3-tuple
-  and include `"id"` and `"decay_rate"` in fixture doctrine dicts
-- Integration test still passes 7/7 success criteria
+5. **State files updated**: W009 closed (→R007), D001 moved to Completed,
+   PROGRESS.md updated, CLAUDE_BRIEFING.md updated.
 
 ---
 
-## Current state of codebase
+## Important: audit discipline
+
+Both this session and the previous one discovered pre-written code/tests
+that the state files didn't reflect. The audit pattern that found this:
 
 ```
-src/simulator/
-    grid.py               COMPLETE — 12 tests
-    units.py              COMPLETE — 29 tests
-    physics.py            COMPLETE — 23 tests
-    battle.py             COMPLETE — 26 tests
-    logger.py             COMPLETE — 35 tests  (+4 increment_doctrine_failure)
-    snapshot.py           COMPLETE — 20 tests
-    training_profiles.py  COMPLETE — 22 tests
-
-src/brain/
-    world_model.py        COMPLETE — 30 tests
-    doctrine_extractor.py COMPLETE — 36 tests
-    player_profiler.py    COMPLETE — 35 tests
-    decision_engine.py    COMPLETE — 57 tests  (+14 new)
-
-scripts/
-    generate_corpus.py       COMPLETE
-    run_integration_test.py  COMPLETE — 7/7 pass (unchanged)
-
-Total: 318/318 tests passing
+grep -n "def <method_name>" src/brain/decision_engine.py
+grep -n "def <method_name>" src/simulator/logger.py
+python3 -m pytest tests/ --co  # collected count vs expected
 ```
 
----
-
-## Stage 3 candidate status
-
-| Candidate | Description | Status |
-|-----------|-------------|--------|
-| A | Live Integration Test | ✅ COMPLETE |
-| B | Doctrine Feedback Loop | ✅ COMPLETE |
-| C | Player-General Relationship | 🔲 NEXT |
-| D | Logger Repository Split | 🔲 Deferred |
-| E | Scout Mechanics | 🔲 Deferred |
+Always run the collection count before assuming tests are missing.
+Always grep for method names before assuming they need to be built.
 
 ---
 
@@ -91,85 +64,118 @@ Total: 318/318 tests passing
 
 **Stage 3 Candidate C — Player-General Relationship**
 
-The `player_general_relationship` table exists in the schema and is created
-by `logger.py` but has zero rows and no write path. This is the General's
-personal memory of specific players — trust, betrayal, cooperation history.
-Distinct from `player_profiles` (what the player does) and `doctrines`
-(what war teaches). This is: what is MY history with THIS person.
+The relationship table exists with the correct schema (server_id fixed this session).
+The logger methods (`upsert_relationship`, `get_relationship`) exist and are tested.
+What does NOT exist yet:
 
-See `state/DEFERRED_ITEMS.md` D008 for full spec.
+**`src/brain/relationship_manager.py`** — new file, analogous to `player_profiler.py`.
 
-Minimum viable implementation for Stage 3:
-1. `logger.py` — confirm `upsert_relationship()` and `get_relationship()` exist
-   (check if they survived the server-scoped migration, or need updating)
-2. A `RelationshipManager` class in `src/brain/relationship_manager.py`:
-   - `update_after_battle(player_id, server_id, battle_result, decisions_made)`
-     → updates trust_level based on outcome and any notable events
-   - `get_trust(player_id, server_id)` → float [-1.0, 1.0]
-   - `get_relationship_summary(player_id, server_id)` → dict
-3. Wire into `DecisionEngine.decide()`: if trust_level < -0.5, boost DEFENSIVE_HOLD
-   and AMBUSH; if trust_level > 0.5, slight boost to FLANK_ATTEMPT (earned respect)
-4. Wire `update_after_battle()` into the integration test post-battle block
+### What it must do
 
-Trust update rules (simple for Stage 3):
-  loss  → trust_level -= 0.05  (player is dangerous)
-  win   → trust_level += 0.02  (General has measure of this player)
-  draw  → no change
-  Any doctrine-backed decision that produced a win → notable_event logged
+After each battle, update the relationship record:
+```python
+# On loss:   trust_level -= 0.05
+# On win:    trust_level += 0.02
+# On draw:   no change
+# Always:    cooperation_count += 1 (if player chose cooperative action)
+#            betrayal_count    += 1 (if player broke formation or exploited truce)
+```
+
+Trust level bounds: clamp to [-1.0, 1.0].
+
+### How DecisionEngine uses it
+
+After `_player_factor()`, a `_relationship_factor()` call applies trust:
+```python
+# trust > 0.5:  General is cautious — boosts DEFENSIVE_HOLD, reduces AGGRESSIVE_PUSH
+# trust < -0.5: General is wary   — boosts AMBUSH, reduces TERRAIN_EXPLOIT (predictable)
+# near 0:       neutral — factor = 1.0
+```
+
+Factor range: [0.7, 1.3] — same scale as other factors.
+
+### Files to touch
+1. `src/brain/relationship_manager.py` — new file (~120 lines)
+2. `src/brain/decision_engine.py` — add `_relationship_factor()`, wire into `decide()`
+3. `src/simulator/logger.py` — no changes needed (methods already exist)
+4. `tests/test_relationship_manager.py` — new test file (~25 tests)
+5. `tests/test_decision_engine.py` — extend existing tests with relationship factor
+
+**Do NOT build yet.** Audit first to check if relationship_manager.py was also
+pre-written. Run:
+```bash
+ls src/brain/
+grep -n "def test_" tests/test_decision_engine.py | wc -l  # currently 58
+```
+
+If relationship_manager.py exists → run tests, verify, update state files.
+If it doesn't → plan with Arman, confirm design, then build.
 
 ---
 
-## How to run integration test
+## Candidate status
+
+| Candidate | Description | Status |
+|-----------|-------------|--------|
+| A | Live Integration Test | ✅ COMPLETE |
+| B | Doctrine Feedback Loop | ✅ COMPLETE |
+| C | Player-General Relationship | 🔲 NEXT — audit first |
+| D | Logger Repository Split | 🔲 Deferred (trigger hit, wait for C) |
+| E | Scout Mechanics | 🔲 Deferred |
+
+---
+
+## DB state (as of session end)
+
+5 doctrines in production DB (failure_count updated by verification battle):
+```
+doctrine_river_weather_flood           conf=1.0000  fc=6   decay=0.000051
+doctrine_forest_cavalry_tree_fall      conf=1.0000  fc=24  decay=0.001175
+doctrine_wall_siege_wall_collapse      conf=0.9999  fc=0   decay=0.005000
+doctrine_frozen_lake_cavalry_ice_break conf=0.9989  fc=0   decay=0.005000
+doctrine_frozen_lake_siege_ice_break   conf=0.9872  fc=0   decay=0.005000
+```
+
+Note: fc values above reflect the single verification battle (seed=9).
+They will accumulate with each integration test run. This is correct behavior.
+
+---
+
+## How to run the integration test
 
 ```bash
 cd ~/Projects/general_brain
-python3 scripts/run_integration_test.py           # seed=42, verbose
-python3 scripts/run_integration_test.py --seed 99
-python3 scripts/run_integration_test.py --quiet
+python3 scripts/run_integration_test.py            # full output, 2 battles
+python3 scripts/run_integration_test.py --quiet    # summary only
+python3 scripts/run_integration_test.py --seed 99  # different main battle seed
 ```
 
 ---
 
-## Key API reminders for next session
+## Handoff verification prompt
 
-**record_battle_outcome signature:**
-```python
-engine.record_battle_outcome(
-    result="loss",           # str: "win" | "loss" | "draw"
-    decisions_made=[...],    # List[dict]: decide() outputs, one per turn
-) -> int                     # number of failure increments applied
 ```
+I'm continuing development of "The Last General's Mind" project.
+You have full terminal access to my local machine via Desktop Commander MCP.
 
-**increment_doctrine_failure:**
-```python
-logger.increment_doctrine_failure(doctrine_id: str) -> bool
-# Returns True if found and updated
-# decay_rate is automatically recomputed on each call
-```
+Before doing anything else, run this verification:
 
-**doctrine dict now includes decay_rate and id:**
-```python
-{
-    "id":              "doctrine_river_weather_flood",
-    "condition":       "river+weather",
-    "learned_effect":  "flood",
-    "confidence":      1.0,
-    "decay_rate":      0.005,   # rises as failure_count grows
-    "failure_count":   0,
-    "episode_count":   2000,
-    "derived_principle": "Rivers flood under heavy rain.",
-    ...
-}
-```
+    cd ~/Projects/general_brain && python3 -m pytest tests/ --tb=short -q
 
----
-
-## Files Claude must read at session start
+Then read these files in this exact order — fully, no skimming:
 1. state/CLAUDE_BRIEFING.md
 2. state/ARCHITECTURE.md
 3. state/PROGRESS.md
 4. state/KNOWN_ISSUES.md
-5. state/SESSION_HANDOFF.md  (this file)
-6. state/DEFERRED_ITEMS.md   (check D008 before designing Candidate C)
-7. src/brain/decision_engine.py  (understand current pipeline before extending)
-8. src/simulator/logger.py       (check relationship methods before writing new ones)
+5. state/SESSION_HANDOFF.md
+
+Once you have read all five files and confirmed 319/319 tests pass, tell me:
+- Which Stage 3 candidates are complete and what was verified in each
+- What the audit discipline rule is and why it matters
+- What Candidate C requires, and what the first thing to do before writing
+  any code for it is
+- What the relationship_factor() trust thresholds are and what factor range
+  it should operate in
+
+Do not start writing any code until I confirm your understanding is correct.
+```

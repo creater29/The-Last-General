@@ -355,6 +355,29 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 
 ---
 
+### D001 — Doctrine failure_count and decay_rate wiring ✅
+**Completed:** 2026-06-28 (Stage 3 Candidate B)
+**What was built:**
+- decision_engine.py: `_doctrine_factor()` returns real doctrine `id` from DB
+  (fixes W009 — no more synthetic IDs in `doctrines_consulted`)
+- decision_engine.py: `_doctrine_factor()` applies decay at read time:
+  effective_confidence = confidence × (1 − decay_rate)
+- logger.py: `increment_doctrine_failure(doctrine_id)` — increments
+  failure_count, recomputes decay_rate = failure_count / (episode_count + failure_count)
+- decision_engine.py: `record_battle_outcome(result, decisions_made)` — after a
+  losing battle, increments failure_count on every doctrine consulted
+- 14 new tests (319/319 total)
+**Verification (run_integration_test.py, seed=9, LOSS):**
+  Before: doctrine_forest_cavalry_tree_fall  failure_count=0  decay_rate=0.005000
+  After:  doctrine_forest_cavalry_tree_fall  failure_count=24 decay_rate=0.001175
+  Before: doctrine_river_weather_flood       failure_count=0  decay_rate=0.005000
+  After:  doctrine_river_weather_flood       failure_count=6  decay_rate=0.000051
+  Unconsulted doctrines (wall, frozen_lake_cavalry, frozen_lake_siege): unchanged ✓
+  record_battle_outcome() returned 30 increments ✓
+**Status:** COMPLETE — implemented, tested, and verified in live pipeline.
+
+---
+
 ### D003 — Rare event weighting in doctrine extraction ✅
 **Completed:** 2026-06-23 (Session 6 — training profiles)
 **Resolution:** Solved at the data layer, not the extractor layer.
@@ -364,8 +387,6 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 **Deviations from original plan:** Did not add rarity multiplier to extractor.
   Architecture decision: world_model represents observations accurately;
   data imbalance is fixed upstream by corpus generation.
-
----
 
 ### D004 — Weather probability rebalancing ✅
 **Completed:** 2026-06-23 (Session 6 — training profiles)
