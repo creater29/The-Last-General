@@ -86,48 +86,58 @@ Trust level bounds: clamp to [-1.0, 1.0].
 ### How DecisionEngine uses it
 
 After `_player_factor()`, a `_relationship_factor()` call adjusts the General's
-psychological posture toward this opponent — never specific battlefield tactics.
+psychological posture. RelationshipManager returns **psychological modifiers**,
+not intent weights. DecisionEngine translates those modifiers into intent score
+adjustments.
 
-**Architectural Rule (permanent):**
-Relationship memory modifies the General's *attitude toward the opponent*,
+**Why modifiers, not intent weights:**
+RelationshipManager must not know intent names. Today there are 8 intents.
+Stage 5+ may have 40 or 100+. If RelationshipManager names intents, every new
+intent requires editing relationship logic — that is coupling. Psychological
+modifiers are independent of the intent taxonomy forever.
+
+**RelationshipManager returns:**
+```python
+{
+    "risk_modifier":        float,  # willingness to take risks [0.85–1.15]
+    "commitment_modifier":  float,  # decisiveness — how committed the General is [0.85–1.15]
+    "confidence_modifier":  float,  # trust in own read of the opponent [0.85–1.15]
+}
+```
+
+**DecisionEngine interprets (owns the mapping):**
+```python
+# high risk_modifier (trust > 0.5, General willing to commit):
+#   → mild boost to decisive intents (those that expose the General)
+# low risk_modifier (trust < -0.5, General is wary):
+#   → mild boost to cautious intents (those that protect position)
+# DecisionEngine already knows which intents are "decisive" vs "cautious"
+# RelationshipManager never needs to know intent names
+```
+
+**Architectural Rule (permanent — also in ARCHITECTURE.md):**
+Relationship memory modifies the General's *psychological state*,
 never the *specific battlefield tactic*. Tactical selection remains the
 responsibility of doctrines, player profiling, and situation evaluation.
 
-What relationship MAY influence:
-- Risk tolerance (willingness to commit to decisive action)
-- Caution threshold (how readily the General holds back)
-- Confidence adjustment (how much the General trusts his own read)
-- Willingness to retreat or regroup
+RelationshipManager must NEVER name or reference intent strings directly.
+Intent mapping from psychological state belongs exclusively to DecisionEngine.
 
-What relationship must NEVER directly score:
-- AMBUSH, FLANK, SIEGE, CAVALRY_CHARGE, TERRAIN_EXPLOIT
-  (those are tactical decisions owned by doctrines + player profile)
-
-**Factor formulation:**
-```python
-# trust > 0.5:  General is willing to commit — mild boost to decisive intents
-#               AGGRESSIVE_PUSH, TERRAIN_EXPLOIT, FLANKING_MANEUVER
-# trust < -0.5: General is wary — mild boost to cautious intents
-#               DEFENSIVE_HOLD, REGROUP
-# near 0:       factor = 1.0 (neutral — no posture adjustment)
-```
-
-Factor range: [0.85, 1.15] — narrower than doctrine/player factors.
-Relationship is psychological background; it should not dominate tactical scoring.
-
-The signal is "how committed or cautious is the General feeling toward this
-opponent" — not "which specific maneuver does he choose."
+Factor range: [0.85, 1.15] per modifier — relationship is psychological background,
+it must not dominate doctrine or player profile signals.
 
 **Explanation trace this enables (five years from now):**
 ```
 Why AMBUSH?
   Situation: Forest
-  Doctrine:  Forest ambush successful (conf 0.93)  ← military knowledge
-  Player:    Often overextends left flank           ← tactical read
-  Relationship: Low trust → General is cautious     ← psychological posture
-  Decision: Ambush
+  Doctrine:  Forest ambush successful (conf 0.93)     ← military knowledge
+  Player:    Often overextends left flank              ← tactical read
+  Relationship: trust=-0.6 → risk_modifier=0.88       ← psychological posture
+                             commitment_modifier=0.91
+  DecisionEngine: low commitment → cautious intents boosted → AMBUSH wins
+  Decision: AMBUSH
 ```
-Relationship confirmed caution; the other two systems chose the tactic.
+Relationship produced modifiers. DecisionEngine chose the tactic.
 
 ### Files to touch
 1. `src/brain/relationship_manager.py` — new file (~120 lines)

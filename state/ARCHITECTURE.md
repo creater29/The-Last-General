@@ -85,6 +85,19 @@ Relationship must NEVER directly score specific tactics:
 AMBUSH, FLANK, SIEGE, CAVALRY_CHARGE, TERRAIN_EXPLOIT — those belong to
 doctrines and player profiling.
 
+**Interface rule — RelationshipManager is intent-blind:**
+RelationshipManager returns abstract psychological modifiers, never intent weights:
+```python
+{
+    "risk_modifier":       float,  # willingness to take risks     [0.85–1.15]
+    "commitment_modifier": float,  # decisiveness / commitment     [0.85–1.15]
+    "confidence_modifier": float,  # trust in own read of opponent [0.85–1.15]
+}
+```
+DecisionEngine translates these modifiers into intent score adjustments.
+RelationshipManager must never reference intent names regardless of how many
+intents are added in future stages.
+
 **Why this matters — the five-year explanation test:**
 A decision should be fully explainable by citing exactly one contribution
 from each system:
