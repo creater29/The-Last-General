@@ -143,6 +143,7 @@ class EpisodeLogger:
                 cooperation_count       INTEGER NOT NULL DEFAULT 0,
                 times_attempted_capture INTEGER NOT NULL DEFAULT 0,
                 known_deceptions        INTEGER NOT NULL DEFAULT 0,
+                encounters              INTEGER NOT NULL DEFAULT 0,
                 predicted_next_intent   TEXT,
                 prediction_confidence   REAL NOT NULL DEFAULT 0.0,
                 notable_events          JSON NOT NULL DEFAULT '[]',
@@ -485,6 +486,7 @@ class EpisodeLogger:
                     cooperation_count = ?,
                     times_attempted_capture = ?,
                     known_deceptions = ?,
+                    encounters = ?,
                     predicted_next_intent = ?,
                     prediction_confidence = ?,
                     notable_events = ?
@@ -496,6 +498,7 @@ class EpisodeLogger:
                     data.get("cooperation_count", 0),
                     data.get("times_attempted_capture", 0),
                     data.get("known_deceptions", 0),
+                    data.get("encounters", 0),
                     data.get("predicted_next_intent"),
                     data.get("prediction_confidence", 0.0),
                     notable,
@@ -509,8 +512,9 @@ class EpisodeLogger:
                 INSERT INTO player_general_relationship
                     (server_id, player_id, trust_level, betrayal_count,
                      cooperation_count, times_attempted_capture, known_deceptions,
-                     predicted_next_intent, prediction_confidence, notable_events)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     encounters, predicted_next_intent, prediction_confidence,
+                     notable_events)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     server_id,
@@ -520,6 +524,7 @@ class EpisodeLogger:
                     data.get("cooperation_count", 0),
                     data.get("times_attempted_capture", 0),
                     data.get("known_deceptions", 0),
+                    data.get("encounters", 0),
                     data.get("predicted_next_intent"),
                     data.get("prediction_confidence", 0.0),
                     notable,
@@ -565,8 +570,8 @@ class EpisodeLogger:
         cols = {row["name"] for row in conn.execute(
             "PRAGMA table_info(player_general_relationship)"
         ).fetchall()}
-        if "server_id" in cols:
-            return  # already migrated — no-op
+        if "server_id" in cols and "encounters" in cols:
+            return  # already at current schema — no-op
 
         # Drop and recreate: table is empty so no data loss
         conn.execute("DROP TABLE IF EXISTS player_general_relationship")
@@ -579,6 +584,7 @@ class EpisodeLogger:
                 cooperation_count       INTEGER NOT NULL DEFAULT 0,
                 times_attempted_capture INTEGER NOT NULL DEFAULT 0,
                 known_deceptions        INTEGER NOT NULL DEFAULT 0,
+                encounters              INTEGER NOT NULL DEFAULT 0,
                 predicted_next_intent   TEXT,
                 prediction_confidence   REAL NOT NULL DEFAULT 0.0,
                 notable_events          JSON NOT NULL DEFAULT '[]',

@@ -40,6 +40,7 @@ from brain.world_model import WorldModel
 from brain.doctrine_extractor import DoctrineExtractor
 from brain.player_profiler import PlayerProfiler
 from brain.decision_engine import DecisionEngine, ALL_INTENTS
+from brain.relationship_manager import RelationshipManager
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,8 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     wm     = WorldModel(logger)
     de     = DoctrineExtractor(logger, wm)
     pp     = PlayerProfiler(logger)
-    engine = DecisionEngine(logger, wm, de, pp)
+    rm     = RelationshipManager(logger)
+    engine = DecisionEngine(logger, wm, de, pp, relationship_manager=rm)
 
     # -------------------------------------------------------------------
     # Step 2 — Pre-battle: prime the knowledge base from corpus
@@ -172,12 +174,13 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     total_rejected            = 0
     total_doctrines_consulted = 0
     profiles_used_count       = 0
+    relationship_used_count   = 0
 
     # -------------------------------------------------------------------
     # Step 6 — brain_intent_fn: the integration bridge
     # -------------------------------------------------------------------
     def brain_intent_fn(state):
-        nonlocal total_rejected, total_doctrines_consulted, profiles_used_count
+        nonlocal total_rejected, total_doctrines_consulted, profiles_used_count, relationship_used_count
         try:
             knowledge = loop.to_brain_snapshot(SERVER_ID, PLAYER_ID)
             decision  = engine.decide(knowledge)
@@ -187,6 +190,8 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
             total_doctrines_consulted += len(decision["doctrines_consulted"])
             if decision["profile_used"]:
                 profiles_used_count += 1
+            if decision.get("relationship_used"):
+                relationship_used_count += 1
 
             # Store full trace
             turn_decisions.append({
@@ -247,6 +252,13 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     post_doctrines = de.extract_doctrines()
     log(f"  update_from_observations() → {post_beliefs} belief rows")
     log(f"  extract_doctrines()        → {post_doctrines} doctrines upserted")
+
+    log(f"[POST-BATTLE] Updating relationship record (Battle 1)...")
+    rel_before_b1 = rm.get_state(SERVER_ID, PLAYER_ID)
+    rm.update_after_battle(SERVER_ID, PLAYER_ID, state.result)
+    rel_b1 = rm.get_state(SERVER_ID, PLAYER_ID)
+    log(f"  encounters: {rel_before_b1.encounters} → {rel_b1.encounters}  "
+        f"trust: {rel_b1.trust_level:.4f}")
 
     post_battle_ok = True  # reached this point without exception
 
@@ -349,10 +361,26 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
             log(f"\n  Doctrines changed: {changed}")
             log(f"  Increments applied by record_battle_outcome(): {increments_applied}")
 
+            # Update relationship after feedback battle
+            rel_before_b2 = rm.get_state(SERVER_ID, PLAYER_ID)
+            rm.update_after_battle(SERVER_ID, PLAYER_ID, fb_state.result)
+            rel_b2 = rm.get_state(SERVER_ID, PLAYER_ID)
+            log(f"\n  Relationship after Battle 2 (loss):")
+            log(f"    encounters: {rel_before_b2.encounters} → {rel_b2.encounters}  "
+                f"trust: {rel_b2.trust_level:.4f}")
+
+            relationship_updated = rel_b2.encounters == rel_before_b2.encounters + 1
+            if not relationship_updated:
+                feedback_details.append(
+                    f"Expected encounters to increment by 1: "
+                    f"{rel_before_b2.encounters} → {rel_b2.encounters}"
+                )
+
             feedback_ok = (
                 changed > 0
                 and increments_applied > 0
                 and len(fb_errors) == 0
+                and relationship_updated
             )
             if not feedback_ok:
                 if changed == 0:
@@ -378,6 +406,7 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
         "no_pipeline_errors":    len(pipeline_errors) == 0,
         "post_battle_ran":       post_battle_ok,
         "feedback_loop_verified": feedback_ok,
+        "relationship_updated":  rel_b1.encounters == rel_before_b1.encounters + 1,
     }
     all_passed = all(criteria.values())
 
@@ -393,6 +422,7 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     log(f"  Rejected intents (total):   {total_rejected}")
     log(f"  Doctrines consulted:        {total_doctrines_consulted}")
     log(f"  Turns profile was used:     {profiles_used_count}")
+    log(f"  Turns relationship used:    {relationship_used_count}")
     log(f"  Pipeline errors:            {len(pipeline_errors)}")
     log(f"  Feedback increments:        {increments_applied}")
 
@@ -413,6 +443,10 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
         "feedback_loop_verified": (
             f"Doctrine DB updated after loss "
             f"({increments_applied} failure_count increments applied)"
+        ),
+        "relationship_updated":  (
+            f"Relationship record updated after battle "
+            f"(encounters={rel_b1.encounters}, trust={rel_b1.trust_level:.4f})"
         ),
     }
 

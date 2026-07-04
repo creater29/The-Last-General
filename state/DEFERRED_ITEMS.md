@@ -108,9 +108,18 @@ doctrine IDs before failure_count can be incremented on the correct row.
 
 ---
 
-### D008 — Relationship memory (player_general_relationship table)
-**Deferred from:** Architecture — table exists in schema, no writer built yet
-**Status:** NEXT TASK — Stage 3 Candidate C
+### D008 — Relationship memory (player_general_relationship table) ✅
+**Completed:** 2026-06-28 (Stage 3 Candidate C)
+**Note:** Implementation diverged from the original spec below after architectural
+review (three-round supervisor review chain). Original spec had RelationshipManager
+computing modifiers and directly boosting named intents — this was corrected before
+implementation. See PROGRESS.md Candidate C and ARCHITECTURE.md orthogonality rule
+for the actual design: RelationshipManager returns raw RelationshipState; DecisionEngine
+owns all interpretation via `_relationship_factor()`. `get_trust()` and
+`get_relationship_summary()` were not built — `get_state()` returning `RelationshipState`
+replaced them. `encounters` field added (not in original spec) to distinguish
+"never met" from "known neutral" without using `Optional`.
+**Original spec (superseded, kept for history):**
 **When to address:** NOW (next session after Candidate B)
 **What to do:**
 See SESSION_HANDOFF.md for the full implementation spec. Summary:
@@ -263,6 +272,32 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
   test in test_snapshot.py that verifies the field is populated correctly.
 - Reviewers: treat any CommanderKnowledge PR that adds a field without updating
   decision_engine.py as a red flag.
+
+---
+
+### D022 — IntentMetadata (replace hardcoded intent category tables)
+**Deferred from:** Candidate C architectural review — supervisor review flagged
+  hardcoded intent categories in `_relationship_factor()` as non-scalable
+**Current state:** `decision_engine.py` has three hardcoded sets:
+  `_HIGH_COMMITMENT`, `_CAUTIOUS`, `_NEUTRAL` — 8 intents split across them.
+  `SUPPLY_RAID` left unclassified in `_NEUTRAL` — execution-dependent risk profile
+  (small raid vs. deep strike) that the current model cannot represent.
+**Why deferred:** Acceptable today at 8 intents. Not acceptable at 40+ intents —
+  every new intent would require editing `_relationship_factor()`'s category sets,
+  which is exactly the kind of coupling the orthogonality rule exists to prevent.
+**When to address:** Trigger when EITHER:
+  - intent count exceeds 15, OR
+  - intent category maintenance becomes difficult (frequent edits, unclear
+    classification for new intents — SUPPLY_RAID is already a preview of this)
+**What to do:**
+- Define `IntentMetadata` per intent: `commitment: float, aggression: float,
+  exposure: float` (each roughly [0.0, 1.0])
+- Replace `_HIGH_COMMITMENT`/`_CAUTIOUS`/`_NEUTRAL` set membership with a
+  continuous function of `commitment_modifier` × intent's `commitment` dimension
+- This also resolves the SUPPLY_RAID classification problem: metadata could
+  eventually vary by battle context (raid size) rather than being a fixed label
+- RelationshipManager is unaffected — it remains intent-blind before and after
+  this change. Only DecisionEngine's `_relationship_factor()` changes.
 
 ---
 

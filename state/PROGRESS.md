@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 319/319
+## Test Count: 341/341
 
 ---
 
@@ -110,20 +110,63 @@ Integration test: 8/8 PASS (added feedback_loop_verified criterion)
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate C — Player-General Relationship [NEXT 🔲]
-- Build player_general_relationship table (trust, betrayal, cooperation)
-- Schema described in ARCHITECTURE.md; no code exists yet
-- Requires live loop (now available) to generate relationship events
+### Candidate C — Player-General Relationship [COMPLETE ✅]
+**Completed:** 2026-06-28
+
+**Design (per architectural review chain — see ARCHITECTURE.md orthogonality rule):**
+- RelationshipManager returns `RelationshipState` (raw data) — intent-blind, never
+  computes modifiers, never references intent names
+- DecisionEngine computes `RelationshipModifiers`-equivalent via `_relationship_factor()`
+  — owns the translation from psychological state to per-intent score adjustment
+- `confidence_modifier` deferred at 1.0 — awaits prediction-accuracy evidence (not betrayal_count)
+- `SUPPLY_RAID` classified NEUTRAL — execution-dependent risk profile, not posture-driven
+- `encounters` field distinguishes "never met" (encounters=0) from "known neutral"
+  (encounters>0, trust=0.0) — avoids `Optional[RelationshipState]`, consistent with
+  the CommanderKnowledge pattern (domain layers never see missing-data as None)
+
+**Built:**
+- `src/brain/relationship_manager.py` (173 lines) — `RelationshipState` frozen dataclass,
+  `RelationshipManager.get_state()`, `update_after_battle(result, events=None)`
+- `src/simulator/logger.py` — schema fix: `encounters INTEGER NOT NULL DEFAULT 0` added
+  to `player_general_relationship`; `upsert_relationship()`, `get_relationship()`,
+  `migrate_relationship_schema()` updated
+- `src/brain/decision_engine.py` — `_relationship_factor()` (module-level function,
+  same pattern as `_doctrine_factor`/`_player_factor`); `__init__` accepts optional
+  `relationship_manager` (backward-compatible); `decide()` wires it in, adds
+  `relationship_used` to return dict
+- `tests/test_relationship_manager.py` — 22 new tests
+- Test count: 319 → 341
+
+**Temporary implementation detail (documented, not permanent):**
+Intent categories (`_HIGH_COMMITMENT`, `_CAUTIOUS`, `_NEUTRAL`) are hardcoded in
+`decision_engine.py`. This is explicitly temporary — see DEFERRED_ITEMS D022
+(IntentMetadata). Acceptable for 8 intents; must be replaced before intent count
+becomes unmanageable.
+
+**Verification (run_integration_test.py — 9/9 criteria PASS):**
+- Battle 1 (seed=42, WIN): relationship encounters incremented +1, confirmed via delta check
+- Battle 2 (seed=9, LOSS): relationship encounters incremented +1, confirmed via delta check
+- `relationship_used=True` on all 30 turns of Battle 1 (encounters>0 from prior test runs)
+
+**Important note — trust value accumulates across integration test runs (like doctrine
+failure_count):** Because the integration test uses the production DB, the relationship
+record for `(integration_test_server, integration_test_player)` accrues history across
+every run. The feedback battle (seed=9) always produces a loss by design, so trust drifts
+downward with repeated test runs — this is expected accumulation, not a defect. The
+success criterion checks the *delta* (`encounters == before + 1`), not the absolute trust
+value. If trust reaches -1.0 (clamped) after many runs, this remains correct behavior.
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
 ### Candidate D — Logger Repository Split [NOT STARTED]
 - logger.py at ~885 lines; split into EpisodeRepository, ObservationRepository,
   DoctrineRepository, ProfileRepository
-- Pure refactor; deferred until after B
+- Pure refactor; deferred until after C
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence
 - Touches Stage 1 files (battle.py, grid.py)
-- Deferred until C is done
+- Deferred until D is done
 
 ---
 

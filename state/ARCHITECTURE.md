@@ -85,18 +85,54 @@ Relationship must NEVER directly score specific tactics:
 AMBUSH, FLANK, SIEGE, CAVALRY_CHARGE, TERRAIN_EXPLOIT — those belong to
 doctrines and player profiling.
 
-**Interface rule — RelationshipManager is intent-blind:**
-RelationshipManager returns abstract psychological modifiers, never intent weights:
+**Interface rule — RelationshipManager is intent-blind AND modifier-blind:**
+RelationshipManager returns raw relationship state, never computed modifiers
+and never intent weights:
 ```python
-{
-    "risk_modifier":       float,  # willingness to take risks     [0.85–1.15]
-    "commitment_modifier": float,  # decisiveness / commitment     [0.85–1.15]
-    "confidence_modifier": float,  # trust in own read of opponent [0.85–1.15]
-}
+@dataclass(frozen=True)
+class RelationshipState:
+    trust_level:              float  # [-1.0, 1.0]
+    betrayal_count:           int
+    cooperation_count:        int
+    times_attempted_capture:  int
+    known_deceptions:         int
+    encounters:               int    # total battles vs this opponent
 ```
-DecisionEngine translates these modifiers into intent score adjustments.
-RelationshipManager must never reference intent names regardless of how many
-intents are added in future stages.
+DecisionEngine computes psychological modifiers FROM this state and translates
+them into intent score adjustments (`_relationship_factor()` in decision_engine.py):
+```python
+risk_modifier       = clamp(1.0 + trust_level * 0.15, 0.85, 1.15)
+commitment_modifier = clamp(1.0 + trust_level * 0.15, 0.85, 1.15)
+confidence_modifier = 1.0  # deferred — awaits prediction-accuracy evidence,
+                           # NOT derived from betrayal_count (different concepts:
+                           # "I trust him less" ≠ "I'm less confident in my read")
+```
+RelationshipManager must never reference intent names, and must never compute
+modifiers — that interpretation step belongs exclusively to DecisionEngine.
+This preserves: if relationship interpretation is later replaced (e.g. by a
+learned evaluator), RelationshipManager and its storage remain untouched.
+
+**RelationshipManager.get_state() always returns RelationshipState, never None.**
+Unknown opponents return `RelationshipState.neutral()` — normalizing missing
+data at the storage boundary, same philosophy as CommanderKnowledge (domain
+layers operate on complete objects; persistence layers hide storage details).
+
+**Distinguishing "never met" from "known neutral" — the `encounters` field:**
+```
+encounters == 0                      → never encountered this commander
+encounters >  0, trust_level == 0.0  → known, currently neutral
+```
+This lives in the data, not the type system — avoids `Optional[RelationshipState]`
+while still preserving the distinction for future features (diplomacy, negotiation)
+that may need to behave differently for a stranger vs. a long-time neutral rival.
+
+**Intent categories are a temporary implementation detail (see DEFERRED_ITEMS D022):**
+`_relationship_factor()` currently classifies intents into HIGH_COMMITMENT / CAUTIOUS /
+NEUTRAL via hardcoded sets in decision_engine.py. This is acceptable at 8 intents but
+does not scale — it will be replaced by per-intent metadata (commitment/aggression/
+exposure dimensions) when intent count or maintenance burden justifies it.
+SUPPLY_RAID is classified NEUTRAL today because its risk profile is execution-dependent
+(small raid vs. deep strike) — a distinction the current model cannot represent.
 
 **Why this matters — the five-year explanation test:**
 A decision should be fully explainable by citing exactly one contribution

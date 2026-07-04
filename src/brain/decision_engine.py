@@ -44,6 +44,7 @@ from simulator.snapshot import CommanderKnowledge
 from brain.world_model        import WorldModel
 from brain.doctrine_extractor import DoctrineExtractor
 from brain.player_profiler    import PlayerProfiler
+from brain.relationship_manager import RelationshipManager, RelationshipState
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +333,91 @@ def _situation_factor(
 
 
 # ---------------------------------------------------------------------------
+# Relationship factor
+# ---------------------------------------------------------------------------
+
+# Temporary intent category tables (explicit: will be replaced by IntentMetadata
+# when intent count exceeds 15 or category maintenance becomes a burden).
+# See DEFERRED_ITEMS.md — intent metadata system.
+#
+# Categories reflect the General's psychological posture, not tactics:
+#   HIGH_COMMITMENT: intents that expose the General's forces to risk
+#   CAUTIOUS:        intents that protect position and minimise exposure
+#   NEUTRAL:         intents driven by terrain/situation, not commitment level
+#
+# SUPPLY_RAID is NEUTRAL here because its risk profile depends on execution
+# context (small raid vs. deep strike) that the current model cannot represent.
+# Classification deferred until intent metadata exists.
+
+_HIGH_COMMITMENT = {"AGGRESSIVE_PUSH", "FLANK_ATTEMPT", "SIEGE"}
+_CAUTIOUS        = {"DEFENSIVE_HOLD",  "RETREAT"}
+_NEUTRAL         = {"TERRAIN_EXPLOIT", "AMBUSH", "SUPPLY_RAID"}
+
+
+def _relationship_factor(
+    intent: str,
+    state:  RelationshipState,
+) -> Tuple[float, List[str]]:
+    """
+    Compute a relationship-derived factor for a single intent.
+
+    DecisionEngine owns this translation from RelationshipState to per-intent
+    factor. RelationshipManager never touches intent names.
+
+    Modifier derivation (from trust_level only — confidence deferred):
+        risk_modifier       = clamp(1.0 + trust * 0.15, 0.85, 1.15)
+        commitment_modifier = clamp(1.0 + trust * 0.15, 0.85, 1.15)
+        confidence_modifier = 1.0  (deferred — awaits prediction accuracy data)
+
+    Intent mapping:
+        HIGH_COMMITMENT intents → commitment_modifier
+        CAUTIOUS intents        → inverse of commitment_modifier (2.0 - cm)
+        NEUTRAL intents         → 1.0 (no adjustment)
+    """
+    notes: List[str] = []
+    trust  = state.trust_level
+    enc    = state.encounters
+
+    if enc == 0:
+        # First encounter — no psychological history, factor is neutral
+        return 1.0, []
+
+    risk_mod       = round(max(0.85, min(1.15, 1.0 + trust * 0.15)), 4)
+    commitment_mod = round(max(0.85, min(1.15, 1.0 + trust * 0.15)), 4)
+    # confidence_modifier = 1.0 — deferred until prediction accuracy exists
+
+    if intent in _HIGH_COMMITMENT:
+        factor = commitment_mod
+        if trust > 0.2:
+            notes.append(
+                f"Relationship trust={trust:.2f} — General is willing to commit "
+                f"(commitment_mod={commitment_mod})."
+            )
+        elif trust < -0.2:
+            notes.append(
+                f"Relationship trust={trust:.2f} — General is wary; "
+                f"high-commitment intent penalised (commitment_mod={commitment_mod})."
+            )
+    elif intent in _CAUTIOUS:
+        factor = round(2.0 - commitment_mod, 4)
+        if trust < -0.2:
+            notes.append(
+                f"Relationship trust={trust:.2f} — General is cautious; "
+                f"defensive posture favoured (factor={factor:.4f})."
+            )
+        elif trust > 0.2:
+            notes.append(
+                f"Relationship trust={trust:.2f} — General is committed; "
+                f"cautious intent slightly penalised (factor={factor:.4f})."
+            )
+    else:
+        # NEUTRAL — no relationship-driven adjustment
+        factor = 1.0
+
+    return round(factor, 4), notes
+
+
+# ---------------------------------------------------------------------------
 # DecisionEngine
 # ---------------------------------------------------------------------------
 
@@ -349,15 +435,17 @@ class DecisionEngine:
 
     def __init__(
         self,
-        logger:    EpisodeLogger,
-        world_model:         WorldModel,
-        doctrine_extractor:  DoctrineExtractor,
-        player_profiler:     PlayerProfiler,
+        logger:               EpisodeLogger,
+        world_model:          WorldModel,
+        doctrine_extractor:   DoctrineExtractor,
+        player_profiler:      PlayerProfiler,
+        relationship_manager: Optional[RelationshipManager] = None,
     ) -> None:
-        self._logger             = logger
-        self._world_model        = world_model
-        self._doctrine_extractor = doctrine_extractor
-        self._player_profiler    = player_profiler
+        self._logger               = logger
+        self._world_model          = world_model
+        self._doctrine_extractor   = doctrine_extractor
+        self._player_profiler      = player_profiler
+        self._relationship_manager = relationship_manager
 
     # ------------------------------------------------------------------
     # Public API
@@ -375,12 +463,20 @@ class DecisionEngine:
             alternatives        — [(intent, confidence)] for top runners-up
             doctrines_consulted — doctrine ids that influenced the decision
             profile_used        — True if a player profile was available
+            relationship_used   — True if a relationship record was available
         """
         # Load current beliefs, doctrines, and player profile from DB
         doctrines = self._doctrine_extractor.get_doctrines()
         profile   = self._player_profiler.get_profile(
             knowledge.server_id, knowledge.player_id
         )
+
+        # Load relationship state (neutral if no history exists)
+        rel_state: Optional[RelationshipState] = None
+        if self._relationship_manager is not None:
+            rel_state = self._relationship_manager.get_state(
+                knowledge.server_id, knowledge.player_id
+            )
 
         # Step 1 — Situation filter
         available, rejected = _filter_intents(knowledge)
@@ -395,9 +491,14 @@ class DecisionEngine:
             p_factor, p_notes        = _player_factor(intent, profile, knowledge)
             s_factor, s_notes        = _situation_factor(intent, knowledge)
 
-            score = round(d_factor * p_factor * s_factor, 4)
+            r_factor = 1.0
+            r_notes: List[str] = []
+            if rel_state is not None:
+                r_factor, r_notes = _relationship_factor(intent, rel_state)
+
+            score = round(d_factor * p_factor * s_factor * r_factor, 4)
             scores[intent]   = score
-            traces[intent]   = d_notes + p_notes + s_notes
+            traces[intent]   = d_notes + p_notes + s_notes + r_notes
             doc_refs[intent] = d_ids   # real doctrine IDs from DB
 
         # Step 5 — Rank and select
@@ -435,6 +536,7 @@ class DecisionEngine:
             "alternatives":         alternatives,
             "doctrines_consulted":  consulted,
             "profile_used":         bool(profile),
+            "relationship_used":    rel_state is not None and rel_state.encounters > 0,
         }
 
     def choose_intent(self, knowledge: CommanderKnowledge) -> str:
