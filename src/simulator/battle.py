@@ -109,7 +109,7 @@ class BattleState:
     combat_results:   List[dict]       = field(default_factory=list)  # all turns combined
 
     # Outcome
-    result:           str  = "in_progress"  # win | loss | draw | retreat | max_turns
+    result:           str  = "in_progress"  # win | loss | draw — set only by _determine_result()
     turns_played:     int  = 0
     final_weather:    str  = "clear"
 

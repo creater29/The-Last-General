@@ -101,11 +101,19 @@ class RelationshipState:
 DecisionEngine computes psychological modifiers FROM this state and translates
 them into intent score adjustments (`_relationship_factor()` in decision_engine.py):
 ```python
-risk_modifier       = clamp(1.0 + trust_level * 0.15, 0.85, 1.15)
+# Currently implemented:
 commitment_modifier = clamp(1.0 + trust_level * 0.15, 0.85, 1.15)
-confidence_modifier = 1.0  # deferred — awaits prediction-accuracy evidence,
-                           # NOT derived from betrayal_count (different concepts:
-                           # "I trust him less" ≠ "I'm less confident in my read")
+
+# Documented but NOT implemented — no current consumer, would be dead code
+# per "evidence before implementation" (removed from executable code after
+# code review during Candidate C; see D022 for reintroduction trigger):
+# risk_modifier       — would diverge from commitment once IntentMetadata
+#                        exists (e.g. SUPPLY_RAID: small raid = low risk/low
+#                        commitment, deep strike = high risk/high commitment —
+#                        a distinction the current intent category sets cannot express)
+# confidence_modifier = 1.0  # deferred — awaits prediction-accuracy evidence,
+#                            # NOT derived from betrayal_count (different concepts:
+#                            # "I trust him less" ≠ "I'm less confident in my read")
 ```
 RelationshipManager must never reference intent names, and must never compute
 modifiers — that interpretation step belongs exclusively to DecisionEngine.

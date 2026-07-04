@@ -74,6 +74,11 @@ class RelationshipState:
 # RelationshipManager
 # ---------------------------------------------------------------------------
 
+# Verified against simulator.battle.BattleLoop._determine_result(): these are
+# the only three values BattleState.result can ever hold.
+_VALID_RESULTS = {"win", "loss", "draw"}
+
+
 class RelationshipManager:
     """
     Manages the General's psychological relationship with specific opponents.
@@ -134,7 +139,22 @@ class RelationshipManager:
         No current battle event types are defined -- do not add interpretations
         until the event vocabulary is established at the simulator level.
         See DEFERRED_ITEMS.md for planned event-aware extension.
+
+        Raises:
+            ValueError: if result is not exactly "win", "loss", or "draw".
+                Verified against simulator.battle.BattleLoop._determine_result(),
+                the only producer of BattleState.result -- it returns exactly
+                these three values (never "retreat" or "max_turns"; a stale
+                comment on that field suggesting otherwise was corrected
+                separately). Validating here prevents a case-typo (e.g. "Win")
+                from silently falling through as a no-op "draw".
         """
+        if result not in _VALID_RESULTS:
+            raise ValueError(
+                f"Invalid battle result: {result!r}. "
+                f"Must be one of {sorted(_VALID_RESULTS)}."
+            )
+
         record = self._logger.get_relationship(server_id, player_id)
 
         if record is None:

@@ -364,10 +364,19 @@ def _relationship_factor(
     DecisionEngine owns this translation from RelationshipState to per-intent
     factor. RelationshipManager never touches intent names.
 
-    Modifier derivation (from trust_level only — confidence deferred):
-        risk_modifier       = clamp(1.0 + trust * 0.15, 0.85, 1.15)
+    Currently implemented (from trust_level only):
         commitment_modifier = clamp(1.0 + trust * 0.15, 0.85, 1.15)
-        confidence_modifier = 1.0  (deferred — awaits prediction accuracy data)
+
+    Deferred — documented but NOT implemented (no current consumer; would be
+    dead code per "evidence before implementation"). See ARCHITECTURE.md
+    "Three Memory Systems" and DEFERRED_ITEMS D022 for when to revisit:
+        risk_modifier       — would diverge from commitment once IntentMetadata
+                               exists (e.g. SUPPLY_RAID: small raid = low risk/
+                               low commitment, deep strike = high risk/high
+                               commitment — a distinction _HIGH_COMMITMENT /
+                               _CAUTIOUS / _NEUTRAL sets cannot express today)
+        confidence_modifier — awaits prediction-accuracy evidence; NOT derived
+                               from betrayal_count (different concepts)
 
     Intent mapping:
         HIGH_COMMITMENT intents → commitment_modifier
@@ -382,9 +391,8 @@ def _relationship_factor(
         # First encounter — no psychological history, factor is neutral
         return 1.0, []
 
-    risk_mod       = round(max(0.85, min(1.15, 1.0 + trust * 0.15)), 4)
     commitment_mod = round(max(0.85, min(1.15, 1.0 + trust * 0.15)), 4)
-    # confidence_modifier = 1.0 — deferred until prediction accuracy exists
+    # confidence_modifier deferred — see docstring above
 
     if intent in _HIGH_COMMITMENT:
         factor = commitment_mod

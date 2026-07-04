@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 341/341
+## Test Count: 345/345
 
 ---
 
@@ -135,7 +135,9 @@ Integration test: 8/8 PASS (added feedback_loop_verified criterion)
   `relationship_manager` (backward-compatible); `decide()` wires it in, adds
   `relationship_used` to return dict
 - `tests/test_relationship_manager.py` — 22 new tests
-- Test count: 319 → 341
+- Test count: 319 → 341 (initial), 341 → 345 (post-review fixes: input
+  validation on `update_after_battle()`, dead `risk_mod` removed — see
+  SESSION_HANDOFF "Post-completion code review")
 
 **Temporary implementation detail (documented, not permanent):**
 Intent categories (`_HIGH_COMMITMENT`, `_CAUTIOUS`, `_NEUTRAL`) are hardcoded in

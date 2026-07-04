@@ -238,3 +238,36 @@ def test_events_list_is_safe_and_ignored():
     state = rm.get_state(SERVER, PLAYER)
     assert state.trust_level == pytest.approx(0.02, abs=1e-6)
     assert state.encounters == 1
+
+
+
+# ---------------------------------------------------------------------------
+# Input validation (result parameter)
+# ---------------------------------------------------------------------------
+
+def test_invalid_result_raises_value_error():
+    _, rm = temp_rm()
+    with pytest.raises(ValueError):
+        rm.update_after_battle(SERVER, PLAYER, "victory")
+
+def test_invalid_result_wrong_case_raises_value_error():
+    """A case-typo like 'Win' must not silently fall through as a no-op draw."""
+    _, rm = temp_rm()
+    with pytest.raises(ValueError):
+        rm.update_after_battle(SERVER, PLAYER, "Win")
+
+def test_invalid_result_does_not_mutate_state():
+    """A rejected call must not create a record or change encounters."""
+    _, rm = temp_rm()
+    with pytest.raises(ValueError):
+        rm.update_after_battle(SERVER, PLAYER, "victory")
+    state = rm.get_state(SERVER, PLAYER)
+    assert state.encounters == 0
+
+def test_all_three_valid_results_accepted():
+    _, rm = temp_rm()
+    rm.update_after_battle(SERVER, PLAYER, "win")
+    rm.update_after_battle(SERVER, PLAYER, "loss")
+    rm.update_after_battle(SERVER, PLAYER, "draw")
+    state = rm.get_state(SERVER, PLAYER)
+    assert state.encounters == 3

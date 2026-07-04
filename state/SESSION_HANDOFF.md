@@ -2,8 +2,68 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 341/341
+## Tests: 345/345
 ## Handoff to: next session
+
+---
+
+## Post-completion code review (same session, after Candidate C initially "done")
+
+Two issues were found in a follow-up code review of the completed Candidate C
+work — both verified against actual code before any fix was applied, per the
+Documentation Verification Rule:
+
+**1. `result: str` in `update_after_battle()` had no input validation.**
+A typo like `"Win"` (wrong case) would silently fall through as a no-op
+"draw" — no error, no signal anything was wrong. Fixed: added `_VALID_RESULTS
+= {"win", "loss", "draw"}` and a `ValueError` raise at the top of the method
+(atomic — fails before any DB read/write).
+
+**Verification that mattered:** before adding that validation, checked what
+values `BattleState.result` can actually hold. Its inline comment claimed
+`# win | loss | draw | retreat | max_turns` — five values. Had the validation
+been written against that comment, it would have accepted stale/wrong values
+or rejected valid ones. Reading `_determine_result()` directly (the only
+function that sets `.result`) showed it returns exactly three values, never
+"retreat" or "max_turns". The comment was stale documentation, not reflecting
+reality. Corrected the comment in `src/simulator/battle.py` (line ~112) as a
+trivial, zero-behavior-change fix directly tied to the verification just done.
+
+**2. Dead `risk_mod` variable in `_relationship_factor()`.**
+Computed with the exact same formula as `commitment_mod`, never used in any
+branch. This was architecturally significant, not just cleanup — `risk_modifier`
+had been an explicitly named part of an earlier-approved three-modifier design
+(risk / commitment / confidence), documented across ARCHITECTURE.md,
+SESSION_HANDOFF.md, and PROGRESS.md. Removing it required a decision, not just
+a deletion.
+
+**Resolution:** Remove the *implementation* (dead code, no consumer, would sit
+unused indefinitely). Keep the *architectural concept* documented (not
+executable) in ARCHITECTURE.md and DEFERRED_ITEMS D022, with an explicit
+reintroduction trigger: when D022 (IntentMetadata) exists and gives risk a
+distinct value from commitment (e.g. SUPPLY_RAID: small raid = low risk/low
+commitment vs. deep strike = high risk/high commitment — a distinction today's
+intent category sets cannot express). This follows "evidence before
+implementation" — the concept isn't lost, it just isn't code until something
+needs it.
+
+**Files touched in this follow-up:**
+- `src/brain/relationship_manager.py` — `_VALID_RESULTS` validation added
+- `src/simulator/battle.py` — stale `.result` comment corrected
+- `src/brain/decision_engine.py` — `risk_mod` removed, docstring corrected
+- `state/ARCHITECTURE.md` — interface rule section corrected to match
+- `state/DEFERRED_ITEMS.md` — D022 extended with risk_modifier reintroduction note
+- `tests/test_relationship_manager.py` — 4 new tests (invalid result, wrong
+  case, no-mutation-on-reject, all-three-valid-accepted)
+- Test count: 341 → 345, all passing. Integration test re-verified: 9/9, exit 0.
+
+**Process note:** two of the edits to `relationship_manager.py` initially used
+the wrong tool (generic sandbox `str_replace` instead of `Desktop Commander:
+edit_block`) and silently wrote to a container copy that isn't the real file —
+the same mistake made earlier with `create_file`. Caught by re-reading the file
+after the "successful" edit and finding the old content still present. Redone
+correctly with the right tool, then verified via the test suite. Recorded here
+so this specific failure mode is recognized faster if it recurs.
 
 ---
 
@@ -184,7 +244,7 @@ Then read these files in this exact order — fully, no skimming:
 5. state/SESSION_HANDOFF.md
 6. state/DEFERRED_ITEMS.md
 
-Once you have read all six files and confirmed 341/341 tests pass, tell me:
+Once you have read all six files and confirmed 345/345 tests pass, tell me:
 - Which Stage 3 candidates are complete and what was verified in each
 - What the three memory systems orthogonality rule is and why it matters
 - What D022 is and why it exists

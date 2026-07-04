@@ -298,6 +298,14 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
   eventually vary by battle context (raid size) rather than being a fixed label
 - RelationshipManager is unaffected — it remains intent-blind before and after
   this change. Only DecisionEngine's `_relationship_factor()` changes.
+- **Also reintroduce `risk_modifier` at this point** — it was removed from
+  `_relationship_factor()` (code review, 2026-06-28) because it was numerically
+  identical to `commitment_modifier` with no distinct consumer, i.e. dead code.
+  The concept remains valid: once IntentMetadata's `exposure` dimension exists,
+  risk and commitment can diverge (SUPPLY_RAID: small raid = low risk/low
+  commitment, deep strike = high risk/high commitment). Do not reintroduce
+  `risk_modifier` before that dimension exists to consume it — same "evidence
+  before implementation" reasoning that removed it.
 
 ---
 
