@@ -409,50 +409,18 @@ class EpisodeLogger:
     # Player profile management
     # ------------------------------------------------------------------
 
-    def upsert_player_profile(self, player_id: str, data: dict, age: int = 1) -> None:
-        """Insert or update a player profile."""
-        conn = self._get_conn()
-        existing = conn.execute(
-            "SELECT encounter_count, first_seen_age FROM player_profiles WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-
-        if existing:
-            conn.execute(
-                """
-                UPDATE player_profiles
-                SET encounter_count = encounter_count + 1,
-                    last_seen_age = ?,
-                    data = ?
-                WHERE player_id = ?
-                """,
-                (age, json.dumps(data), player_id),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO player_profiles
-                    (player_id, encounter_count, first_seen_age, last_seen_age, data)
-                VALUES (?, 1, ?, ?, ?)
-                """,
-                (player_id, age, age, json.dumps(data)),
-            )
-        conn.commit()
-
-    def get_player_profile(self, player_id: str) -> Optional[dict]:
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM player_profiles WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-        if not row:
-            return None
-        result = dict(row)
-        result["data"] = json.loads(result["data"])
-        return result
-
     def get_known_players(self) -> List[str]:
-        """List all player IDs the General has encountered."""
+        """
+        List all player IDs the General has encountered.
+
+        ORPHANED API — zero callers anywhere in the codebase as of 2026-06-28
+        audit. Also currently broken: queries `encounter_count`, a column
+        that does not exist in the current player_profiles schema (would
+        raise sqlite3.OperationalError if ever called). Not repaired because
+        no consumer has been identified yet — see KNOWN_ISSUES for tracking.
+        Do not call this method until it is either fixed with a demonstrated
+        use case, or removed.
+        """
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT player_id FROM player_profiles ORDER BY encounter_count DESC"

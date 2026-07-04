@@ -7,6 +7,66 @@
 
 ---
 
+## Candidate D pre-audit (this session, after Candidate C + post-completion review)
+
+Before starting Candidate D (logger repository split), ran the audit
+SESSION_HANDOFF instructed. Found three things not in the original D014 plan;
+resolved two, tracked one, and corrected D014's scope. **Candidate D
+implementation itself has NOT started — this was prerequisite cleanup only.**
+
+**1. D014's original scope was stale.** Written before Candidate C existed —
+planned 4 stores (Episode/Observation/Doctrine/Profile), with "player
+profiles, relationships" bundled into one `profile_store.py`. That would have
+merged Player Profile and Relationship, violating the orthogonality rule.
+Corrected to 6 stores (added WorldModelStore and RelationshipStore) — see
+D014 in DEFERRED_ITEMS.md for the full corrected plan, including a verified
+table-ownership dependency graph (not guessed — built from grepping every
+FROM/INTO/UPDATE in logger.py against every table name).
+
+**One more thing the dependency graph caught:** the original plan put
+`terrain_knowledge` methods in `doctrine_store.py` ("they feed
+doctrine_extractor"). But terrain_knowledge is WorldModel's domain — learned
+environmental beliefs — not Doctrine's. DoctrineExtractor *reads* WorldModel's
+beliefs to form doctrines; reading isn't owning. Reclassified to a
+`world_model_store.py`. Same "who reads ≠ who owns" logic as Player Profile
+vs. Relationship.
+
+**Also found in passing:** a `counter_doctrines` table exists in the schema
+with zero methods beyond a `COUNT` in `summary()` — same "schema-only,
+unimplemented" pattern `player_general_relationship` had before Candidate C.
+This is presumably the future Counter-Doctrine layer mentioned in
+ARCHITECTURE.md. Out of scope for D014 — noted for whenever that becomes its
+own Candidate. Did not build anything for it.
+
+**2. Two fully dead, shadowed methods removed.** Pre-R006 `upsert_player_profile`
+and `get_player_profile` — bare `player_id`, no `server_id`, unreachable
+(Python only keeps the last definition of a method name; the real server-scoped
+versions exist later in the file). Verified zero callers anywhere before
+removing. logger.py: 981 → 950 lines. 345/345 still passing after removal.
+
+**3. `get_known_players()` — orphaned, not fixed, not deleted.** Queries a
+column (`encounter_count`) that doesn't exist in the current schema — would
+crash if ever called. Zero callers anywhere. Checked all state files for any
+documented plan needing "list all opponents" — none found. Rather than guess
+whether it's needed, marked ORPHANED in its docstring and tracked as
+KNOWN_ISSUES W010. Resolution deferred to Candidate D itself: if still no
+consumer by then, delete; if one has emerged, redesign server-scoped.
+
+**Files touched this pre-audit:**
+- `src/simulator/logger.py` — dead methods removed, `get_known_players()`
+  docstring updated to flag orphan status. 950 lines.
+- `state/DEFERRED_ITEMS.md` — D014 fully rewritten: 6-store plan, dependency
+  graph, terrain_knowledge reclassification, get_known_players resolution plan
+- `state/KNOWN_ISSUES.md` — W010 added
+
+**Candidate D implementation is now unblocked but NOT started.** Next session
+should present an implementation plan for the 6-store split (per D014) and
+wait for confirmation before writing any store files — this is a structural
+change to the persistence layer every subsystem depends on, squarely
+"architecture" territory per the Supervisor Interaction rule.
+
+---
+
 ## Post-completion code review (same session, after Candidate C initially "done")
 
 Two issues were found in a follow-up code review of the completed Candidate C

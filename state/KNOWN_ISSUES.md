@@ -7,7 +7,25 @@ Each entry: date, component, description, fix, current status.
 
 ## Open Issues
 
-None.
+### W010 — get_known_players() orphaned and broken
+**Date found:** 2026-06-28 (Candidate D pre-audit)
+**Component:** src/simulator/logger.py
+**Description:** Queries `encounter_count`, a column that does not exist in
+the current `player_profiles` schema. Would raise `sqlite3.OperationalError`
+if ever called. Has zero callers anywhere in src/, scripts/, or tests/ —
+confirmed via full-codebase grep. Also returns bare `player_id` with no
+`server_id` scoping, so even a corrected version would need a signature change.
+**Impact:** None today — never called, never breaks anything. A landmine only
+if something reaches for it assuming it works (plausible during Candidate D's
+repository split, since "list known players" is a natural method to expect).
+**Investigated:** Searched all state files for any documented plan requiring
+"list all opponents" or equivalent — zero matches. No demonstrated need exists
+currently, but a future feature could plausibly want this (e.g., an admin/
+diagnostic view, or a future dashboard).
+**Resolution deferred to:** Candidate D (D014, logger repository split). At
+that point: if still no consumer found, delete it. If a consumer has emerged
+by then, redesign it server-scoped (`get_known_players(server_id)`).
+**Status:** Open — do not call this method until resolved.
 
 ---
 

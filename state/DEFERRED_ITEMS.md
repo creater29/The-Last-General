@@ -155,21 +155,80 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 
 ### D014 — Logger.py repository split
 **Deferred from:** Design concern raised in ChatGPT review
-**Current state:** logger.py is ~885 lines — PAST the 800-line trigger threshold.
-**Status:** TRIGGER HIT — DEFERRED UNTIL AFTER CANDIDATE C (do not start yet)
-**When to address:** Immediately after Candidate C (player_general_relationship),
-  before D010 (NN predictor) adds more logger methods
+**Current state (updated 2026-06-28, post pre-cleanup):** logger.py is 950 lines
+  (was 981 before dead-code removal — see below). PAST the 800-line trigger.
+**Status:** TRIGGER HIT. Pre-cleanup complete; split itself NOT YET STARTED.
+**Pre-cleanup done before this split can safely begin:**
+  1. Removed two fully dead, shadowed methods: pre-R006 `upsert_player_profile`
+     and `get_player_profile` (bare `player_id`, no `server_id` — unreachable,
+     shadowed by the correct server-scoped versions). Verified zero callers
+     via full-codebase grep before removal. 981 → 950 lines.
+  2. `get_known_players()` marked ORPHANED in its docstring — zero callers
+     anywhere, and currently broken (queries `encounter_count`, a column that
+     doesn't exist in the current schema). Not repaired: no demonstrated
+     consumer. Not deleted: cannot rule out a future need. Resolve during
+     this split — if no consumer is found by then, delete it; if one is
+     found, redesign it server-scoped.
+**When to address the split itself:** Now unblocked — pre-cleanup done.
+
+**Scope correction from original plan:** original plan bundled "player
+  profiles, relationships" into one `profile_store.py`. This would have
+  merged Player Profile and Relationship — two subsystems the orthogonality
+  rule explicitly keeps separate (tactical understanding vs. psychological
+  history). Corrected below to 6 concerns, not 4.
+
+**Dependency graph — table ownership per store (verified via grep, not
+  assumed; this is what the split must follow, not method-name grouping):**
+```
+episodes                  → EpisodeStore
+observations               → ObservationStore
+  (log_episode() writes to BOTH episodes AND observations in one call —
+   EpisodeStore and ObservationStore must collaborate here, not a clean
+   1:1 split; _extract_observations() is the seam)
+terrain_knowledge          → WorldModelStore
+  (RECLASSIFIED from original plan, which put this in doctrine_store.py.
+   terrain_knowledge is WorldModel's domain — learned environmental beliefs,
+   read BY DoctrineExtractor but not OWNED by it. Same distinction as
+   Player Profile vs Relationship: "who reads this" ≠ "who owns this.")
+doctrines                  → DoctrineStore
+player_profiles            → PlayerProfileStore
+player_general_relationship → RelationshipStore
+counter_doctrines          → (schema exists, zero methods reference it beyond
+  a COUNT in summary() — same "schema-only, unimplemented" pattern
+  player_general_relationship had before Candidate C. Out of scope for this
+  split; will need its own store when a future Candidate builds the
+  Counter-Doctrine layer. Do not build methods for it now.)
+```
+
+**Cross-cutting methods that don't belong to any single store** (`summary()`,
+`result_distribution()`, `terrain_event_frequency()` — all read across
+episodes/terrain_knowledge/doctrines/player_profiles/counter_doctrines/
+player_general_relationship): keep on the `EpisodeLogger` facade itself,
+or extract to a separate `StatsAggregator` that composes all stores. Do not
+force these into any single store.
+
 **What to do:**
-- Split into four modules:
-  src/simulator/stores/episode_store.py   — log_episode, get_episodes, get_episode_count
-  src/simulator/stores/observation_store.py — extract/query observations, terrain patterns
-  src/simulator/stores/doctrine_store.py  — upsert/get doctrines, increment_failure
-  src/simulator/stores/profile_store.py   — player profiles, relationships
-  src/simulator/db_manager.py             — _connect, init_db, migrate, close
-- Keep EpisodeLogger as a facade that composes all four stores.
-  All existing call sites (brain files, tests) use logger.X — no call site changes.
-- terrain_knowledge methods go in doctrine_store.py (they feed doctrine_extractor).
-- All 318 existing tests must pass without modification after split.
+- Split into six modules matching the dependency graph above:
+  src/simulator/stores/episode_store.py      — log_episode, get_episodes,
+    get_episode_count, get_episodes_by_terrain_event, get_episode_by_id
+  src/simulator/stores/observation_store.py  — _extract_observations,
+    get_observation_count, get_observations_by_terrain, get_observation_patterns
+  src/simulator/stores/world_model_store.py  — upsert_terrain_knowledge,
+    get_terrain_knowledge, get_all_terrain_knowledge
+  src/simulator/stores/doctrine_store.py     — upsert_doctrine, get_doctrine_by_id,
+    get_all_doctrines, increment_doctrine_failure
+  src/simulator/stores/player_profile_store.py — upsert_player_profile,
+    get_player_profile, get_all_player_profiles, migrate_player_profiles
+  src/simulator/stores/relationship_store.py — upsert_relationship,
+    get_relationship, migrate_relationship_schema
+  src/simulator/db_manager.py                — _connect, init_db, close
+- Keep EpisodeLogger as a facade that composes all six stores.
+  All existing call sites (brain files, tests) use logger.X — no call site
+  changes required.
+- Resolve `get_known_players()` during this split (see above) — search for
+  a consumer one more time at split time in case anything changed; if none,
+  delete; if found, redesign server-scoped.
+- All 345 existing tests must pass without modification after split.
 
 ---
 
