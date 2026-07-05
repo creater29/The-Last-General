@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 345/345
+## Test Count: 355/355
 
 ---
 
@@ -160,10 +160,46 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [NOT STARTED]
-- logger.py at ~885 lines; split into EpisodeRepository, ObservationRepository,
-  DoctrineRepository, ProfileRepository
-- Pure refactor; deferred until after C
+### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 1/6 complete]
+
+Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
+transaction policy, facade contract, extraction order + completion criteria).
+Extraction order: Relationship → PlayerProfile → Doctrine → Observation →
+Episode+facade workflow → facade cleanup (one commit per phase).
+
+**Phase 1 — RelationshipStore — COMPLETE ✅ (2026-06-28)**
+- `src/simulator/stores/relationship_store.py` (new, 157 lines):
+  `RelationshipStore` — owns `player_general_relationship` exclusively.
+  `upsert_relationship()`, `get_relationship()`, `migrate_relationship_schema()`
+  — verbatim extraction, zero behavior change.
+- `src/simulator/logger.py`: imports `RelationshipStore`, constructs it in
+  `__init__` right after `init_db()` (connection already exists by then —
+  verified, not assumed). All three facade methods now thin one-line
+  delegations. Old inline implementation fully removed — no duplicate left
+  behind. 949 → 859 lines.
+- `tests/test_relationship_store.py` (new, 8 tests): includes an explicit
+  Repository Independence test — `RelationshipStore(conn)` constructed and
+  fully exercised with zero import of `EpisodeLogger` or any other store.
+- `tests/test_logger_facade_stability.py` (new, 2 tests): captures
+  `EpisodeLogger`'s complete public method signature baseline (27 methods)
+  from immediately before Phase 1 began, asserts it stays byte-identical
+  through every future phase — the concrete mechanism Artifact 3 promised,
+  not just documented intent.
+- Test count: 345 → 355 (all passing)
+- Integration test: 9/9 PASS, verified live (`encounters: 21→22, trust: -0.33`
+  through the new delegation path — not just "didn't crash")
+
+**Definition of Done, verified for Phase 1:**
+- [✓] Store extracted
+- [✓] LoggerFacade delegates correctly
+- [✓] Repository Independence confirmed (standalone construction + 8 tests)
+- [✓] Old inline implementation removed (no duplication)
+- [✓] Full test suite passes (355/355)
+- [✓] Logger public API unchanged (facade-stability test, 2/2)
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Phase 2 (PlayerProfileStore) — NOT STARTED.** Next up per extraction order.
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence

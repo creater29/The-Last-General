@@ -2,8 +2,63 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 345/345
+## Tests: 355/355
 ## Handoff to: next session
+
+---
+
+## Candidate D Phase 1 — RelationshipStore extraction (COMPLETE)
+
+First actual store extraction, per the fully-specified D014 plan (4 artifacts,
+all previously reviewed and committed). Routine implementation of an
+already-approved spec — no new architectural decisions made during this phase.
+
+**What happened:** Read the exact current `upsert_relationship`,
+`get_relationship`, `migrate_relationship_schema` bodies from `logger.py`
+fresh (not from memory, despite having touched this exact code multiple
+times earlier in the session). Moved them verbatim into
+`src/simulator/stores/relationship_store.py`. Confirmed `EpisodeLogger.__init__`
+calls `init_db()` before anything else, which populates `self._conn` —
+meaning `RelationshipStore` can be constructed eagerly in `__init__`, no
+lazy-getter needed. Wired the facade to delegate via three one-line methods,
+then removed the old inline SQL entirely (949 → 859 lines — extraction
+reduced code, did not duplicate it).
+
+**Also built the facade-stability test Artifact 3 had only promised in
+prose:** captured `EpisodeLogger`'s full 27-method public signature list
+immediately before Phase 1 began, hardcoded it as a baseline in
+`tests/test_logger_facade_stability.py`, and asserted the live class matches
+it exactly. This test now watches every future phase — if a phase changes
+the facade's public surface without updating this baseline explicitly, it
+fails loudly instead of drifting silently.
+
+**Verification, in order:** ran the new store's 8 tests standalone first
+(before touching logger.py at all) → wired the facade → ran full suite
+(355/355) → ran integration test verbose and confirmed the relationship
+numbers actually moved correctly through the new path
+(`encounters: 21→22, trust: -0.33`), not just "exit code 0" → confirmed
+Repository Independence directly (constructed `RelationshipStore` against a
+fresh in-memory connection with zero other imports).
+
+**Files touched:**
+- `src/simulator/stores/__init__.py` (new)
+- `src/simulator/stores/relationship_store.py` (new, 157 lines)
+- `src/simulator/logger.py` (import added, store constructed in `__init__`,
+  three methods reduced to one-line delegations, old inline SQL removed)
+- `tests/test_relationship_store.py` (new, 8 tests)
+- `tests/test_logger_facade_stability.py` (new, 2 tests)
+- `state/PROGRESS.md`, `state/SESSION_HANDOFF.md`
+
+**Next: Phase 2 — PlayerProfileStore.** Same pattern exactly: read current
+`upsert_player_profile`/`get_player_profile`/`get_all_player_profiles`/
+`migrate_player_profiles` bodies fresh from `logger.py` (do not reuse the
+signatures already written in DEFERRED_ITEMS D014 Artifact 1 without
+re-verifying against the live file — that artifact was written from a
+snapshot that may have shifted since). Extract to
+`src/simulator/stores/player_profile_store.py`. Same Definition of Done
+checklist (Artifact 4): standalone test first, then facade delegation, then
+full suite, then remove old inline code, then facade-stability test must
+still pass unchanged.
 
 ---
 
