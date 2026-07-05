@@ -350,19 +350,26 @@ already built above.
 EpisodeStore
   Owns: episode persistence and retrieval
   Tables: episodes
-  Methods: log_episode(state), get_episode_count(player_id=None),
+  Methods: insert_episode_row(episode, timestamp) [no commit — see Transaction
+    Policy, revised], get_episode_count(player_id=None),
     get_episode_by_id(episode_id), get_episodes(...)
-  Note: log_episode() also triggers observation extraction — see Transaction
-  Policy. Depends on ObservationStore for that sub-step only.
+  Depends on: none — REVISED after Repository Independence requirement
+    (supervisor review). log_episode() as a whole (insert episode row +
+    trigger observation extraction + commit) is a WORKFLOW spanning two
+    stores, not a single-store write — it moves to the facade (see
+    Transaction Policy, revised, and Artifact 3). EpisodeStore itself never
+    references ObservationStore.
 
 ObservationStore
   Owns: raw terrain-event evidence extracted from episodes
   Tables: observations
-  Methods: _extract_observations(episode, timestamp) [called by EpisodeStore,
-    does not commit internally — see Transaction Policy],
+  Methods: insert_observations(episode, timestamp) [renamed from
+    _extract_observations, no commit — see Transaction Policy, revised],
     get_observation_count(...), get_observations_by_terrain(...),
     get_observation_patterns(...)
-  Depends on: none directly; is depended on by EpisodeStore
+  Depends on: none — REVISED (see EpisodeStore above). No other store
+  depends on ObservationStore directly either; the facade calls both
+  independently as part of the log_episode() workflow.
 
 WorldModelStore
   Owns: learned environmental beliefs (terrain_knowledge)
@@ -445,15 +452,18 @@ Policy (preserves current behavior, applies it as an explicit rule):
 2. A store method that writes to only its own table commits at the end of
    its own method — matches every current single-table method
    (upsert_doctrine, upsert_relationship, etc.), requires no change.
-3. A method spanning multiple stores' tables — currently only log_episode()
-   (episodes + observations) — is not split so each store commits its own
-   piece. ObservationStore keeps a non-committing internal method
-   (_extract_observations, unchanged), and EpisodeStore.log_episode() calls
-   it, then issues the single commit() itself, exactly mirroring current
-   behavior. EpisodeStore needs a reference to ObservationStore to call that
-   method directly — not a full transaction/session object, since none
-   exists today and inventing one now would be speculative infrastructure
-   ahead of a second real use case.
+3. **REVISED after Repository Independence requirement (supervisor review):**
+   `log_episode()` as a whole is a WORKFLOW spanning two stores (episodes +
+   observations), not a write owned by either one alone. It moves to the
+   facade (`EpisodeLogger.log_episode()`), which calls
+   `EpisodeStore.insert_episode_row(...)` (no commit) then
+   `ObservationStore.insert_observations(...)` (no commit), then issues the
+   single `commit()` itself — same atomic outcome as today, but neither
+   store references the other. This keeps every one of the six stores
+   independently constructable and testable (`RelationshipStore(conn)` with
+   no other store required to exist), which the original draft of this
+   policy (EpisodeStore holding a direct reference to ObservationStore)
+   would have violated.
 4. If a genuine second cross-store write operation is ever added, re-evaluate
    whether a shared transaction abstraction is justified then — do not build
    one now on the strength of a single existing case ("evidence before
@@ -489,39 +499,71 @@ writing store files.
 
 ### Artifact 4 — Extraction Order and Completion Criteria
 
-**Extraction order (lowest-risk first):**
+**Extraction order (lowest operational blast radius first):**
 ```
 Phase 1: RelationshipStore   — no intra-logger dependency, newest/smallest
                                 blast radius if something goes wrong
 Phase 2: PlayerProfileStore  — no intra-logger dependency, independent
 Phase 3: DoctrineStore       — no intra-logger dependency (verified), but
-                                highest CONSUMER criticality — every decision
-                                in DecisionEngine reads through this
-Phase 4: ObservationStore    — feeds DoctrineStore's extraction; depended
-                                on by EpisodeStore (Phase 5)
-Phase 5: EpisodeStore        — most coupled: log_episode() calls
-                                ObservationStore's extraction method directly
-                                (see Artifact 2, Transaction Policy)
+                                highest operational blast radius — every
+                                decision in DecisionEngine reads through this
+Phase 4: ObservationStore    — feeds DoctrineStore's extraction
+Phase 5: EpisodeStore + facade workflow — REVISED (Repository Independence):
+                                EpisodeStore does NOT reference ObservationStore.
+                                The facade's log_episode() calls
+                                EpisodeStore.insert_episode_row() then
+                                ObservationStore.insert_observations(), then
+                                commits once (see Transaction Policy, revised).
+                                Highest blast radius: this is the central
+                                write path every battle goes through.
 Phase 6: Facade cleanup — confirm EpisodeLogger delegates cleanly to all six
                            stores plus the facade-level methods (Artifact 1)
 ```
 
-**Important terminology clarification** — this order is NOT ranked by
-intra-logger dependency count (the verified dependency graph in Artifact 1
-shows only ONE real store-to-store coupling: EpisodeStore→ObservationStore).
-It's ranked by consumer criticality / blast radius: how much of the system
-depends on this store's data being correct if the extraction introduces a
-subtle bug. Doctrine has zero technical dependencies on other stores but the
-highest criticality, since DecisionEngine's scoring reads through it on every
-turn of every battle. Keeping this distinction explicit prevents Artifact 1
-(technical dependency graph) and this ordering from silently contradicting
-each other.
+**Terminology, precise:** this order is ranked by OPERATIONAL BLAST RADIUS
+(how much of the system is affected if this extraction introduces a subtle
+bug), NOT by intra-logger structural dependency count. The verified
+dependency graph in Artifact 1 shows ZERO real store-to-store structural
+coupling after the Phase 5 revision above — every store is independently
+constructable and testable. DoctrineStore has no structural dependency on
+anything but sits mid-order because DecisionEngine's scoring reads through
+it on every turn of every battle — that's an operational fact, not a
+structural one. Keeping these two axes explicit prevents Artifact 1
+(structural dependency graph) and this ordering (operational risk ranking)
+from silently contradicting each other.
+
+**Repository Independence (required, per supervisor review):** every
+extracted store must be constructable and testable standalone — e.g.
+`RelationshipStore(conn)` must work and be fully testable without
+`EpisodeStore`, `ObservationStore`, `DoctrineStore`, `PlayerProfileStore`, or
+`WorldModelStore` existing or being imported. This is now satisfied by all
+six stores after the Phase 5 revision (see Transaction Policy, revised) —
+verify this explicitly for each store at extraction time (e.g. a small
+standalone test that constructs only that one store against a temp DB).
 
 **Hard rule: run the full test suite after EACH phase, not just at the end.**
 A phase is not considered done until all existing tests (345 as of this
 writing, growing as store-specific tests are added) pass with that phase's
 store extracted and the facade delegating to it. Do not proceed to the next
 phase on a red suite.
+
+**One repository extraction per commit (process rule, per supervisor
+review).** Each phase above is its own commit — not because git requires
+it, but so that if a regression appears, the exact extraction that caused it
+is immediately identifiable without bisecting.
+
+**Definition of Done per phase (tightened, per supervisor review) — a phase
+is not complete until ALL of the following hold, in order:**
+```
+1. Store extracted (new file, e.g. src/simulator/stores/relationship_store.py)
+2. LoggerFacade delegates to it correctly
+3. Store passes the Repository Independence check (constructable standalone)
+4. Old inline implementation REMOVED from logger.py — no duplicate
+   implementation left behind "for safety." Extraction reduces code; it does
+   not temporarily double it.
+5. Full test suite passes (345+, growing)
+6. Logger public API unchanged (Artifact 3 signature-comparison test)
+```
 
 **Candidate D completion criteria (in addition to "tests pass"):**
 - All unit tests pass (per-store, growing count)
@@ -531,6 +573,7 @@ phase on a red suite.
   signature-comparison test, not just "it still works." Every existing
   caller (brain/*.py, tests/*.py, scripts/*.py) must compile and run
   with zero call-site changes.
+- No duplicate implementations remain anywhere in logger.py
 - Documentation (this D014 entry, PROGRESS.md) updated to reflect the
   actual final store layout, not the planned one, if anything diverged
   during extraction.
