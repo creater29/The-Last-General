@@ -487,6 +487,71 @@ writing store files.
 
 ---
 
+### Artifact 4 — Extraction Order and Completion Criteria
+
+**Extraction order (lowest-risk first):**
+```
+Phase 1: RelationshipStore   — no intra-logger dependency, newest/smallest
+                                blast radius if something goes wrong
+Phase 2: PlayerProfileStore  — no intra-logger dependency, independent
+Phase 3: DoctrineStore       — no intra-logger dependency (verified), but
+                                highest CONSUMER criticality — every decision
+                                in DecisionEngine reads through this
+Phase 4: ObservationStore    — feeds DoctrineStore's extraction; depended
+                                on by EpisodeStore (Phase 5)
+Phase 5: EpisodeStore        — most coupled: log_episode() calls
+                                ObservationStore's extraction method directly
+                                (see Artifact 2, Transaction Policy)
+Phase 6: Facade cleanup — confirm EpisodeLogger delegates cleanly to all six
+                           stores plus the facade-level methods (Artifact 1)
+```
+
+**Important terminology clarification** — this order is NOT ranked by
+intra-logger dependency count (the verified dependency graph in Artifact 1
+shows only ONE real store-to-store coupling: EpisodeStore→ObservationStore).
+It's ranked by consumer criticality / blast radius: how much of the system
+depends on this store's data being correct if the extraction introduces a
+subtle bug. Doctrine has zero technical dependencies on other stores but the
+highest criticality, since DecisionEngine's scoring reads through it on every
+turn of every battle. Keeping this distinction explicit prevents Artifact 1
+(technical dependency graph) and this ordering from silently contradicting
+each other.
+
+**Hard rule: run the full test suite after EACH phase, not just at the end.**
+A phase is not considered done until all existing tests (345 as of this
+writing, growing as store-specific tests are added) pass with that phase's
+store extracted and the facade delegating to it. Do not proceed to the next
+phase on a red suite.
+
+**Candidate D completion criteria (in addition to "tests pass"):**
+- All unit tests pass (per-store, growing count)
+- All 345+ pre-existing tests pass unmodified
+- Integration test (`run_integration_test.py`) still produces 9/9 PASS
+- **Logger public API unchanged** — verified via the Artifact 3
+  signature-comparison test, not just "it still works." Every existing
+  caller (brain/*.py, tests/*.py, scripts/*.py) must compile and run
+  with zero call-site changes.
+- Documentation (this D014 entry, PROGRESS.md) updated to reflect the
+  actual final store layout, not the planned one, if anything diverged
+  during extraction.
+
+---
+
+### Permanent principle — Repositories own writes, facades own workflows
+
+Codifying the architectural distinction that emerged from Artifact 1's
+handling of cross-store reads (`get_episodes_by_terrain_event()`,
+`summary()`): a repository/store owns persistence for its own table(s).
+A facade owns workflows — sequencing calls across stores, orchestrating
+transactions (Artifact 2), and answering queries that legitimately compose
+multiple stores' data. A cross-store READ (a JOIN, a cross-table aggregate
+like `summary()`) is not a repository boundary violation — repositories own
+writes; queries can legitimately compose repositories at the facade level.
+This is why those methods live on `EpisodeLogger` directly rather than being
+forced into either `EpisodeStore` or `ObservationStore`.
+
+---
+
 ### D022 — IntentMetadata (replace hardcoded intent category tables)
 **Deferred from:** Candidate C architectural review — supervisor review flagged
   hardcoded intent categories in `_relationship_factor()` as non-scalable

@@ -54,6 +54,26 @@ Pre-Implementation Artifacts."** Candidate D implementation still has NOT
 started — these are the proposed contracts, awaiting confirmation before any
 store file is written.
 
+**Refinement pass (same session, after supervisor review of the artifacts
+above):** Added Artifact 4 (extraction order — Relationship → PlayerProfile →
+Doctrine → Observation → Episode → facade cleanup, plus a hard rule to run
+the full test suite after every phase, not just at the end) and a formal
+"Logger public API unchanged" completion criterion tied to Artifact 3's
+signature-comparison test. Also promoted three engineering principles to
+ARCHITECTURE.md's new permanent "Engineering Process Principles" section:
+heuristics identify candidates but implementation establishes truth;
+repository boundaries follow data ownership not method-name grouping;
+repositories own writes while facades own workflows. All three came directly
+out of this session's work, not imposed from outside.
+
+One precision correction made to the extraction-order recommendation before
+adopting it: the order is ranked by consumer criticality / blast radius, NOT
+by intra-logger dependency count — the verified dependency graph in Artifact
+1 shows only one real store-to-store coupling (Episode→Observation).
+DoctrineStore has zero technical dependencies but sits mid-order because
+DecisionEngine reads through it on every decision. Kept both framings
+explicit so Artifact 1 and Artifact 4 don't quietly contradict each other.
+
 ---
 
 ## Candidate D pre-audit (this session, after Candidate C + post-completion review)

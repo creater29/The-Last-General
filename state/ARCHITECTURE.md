@@ -157,6 +157,39 @@ before it can be accepted.
 
 ---
 
+## Engineering Process Principles (Permanent)
+
+These emerged from disciplined review during Stage 3 (Candidates B, C, D
+pre-audit) and apply to all future work on this project, not just the
+subsystem that surfaced them.
+
+**1. Heuristics identify candidates; implementation establishes truth.**
+Any automated shortcut — grep, a quick script, a static-analysis pass, an AI
+summary — is a lead generator, not a source of truth. Confirmed multiple
+times on this project: a table-reference heuristic built during Candidate D's
+audit produced several false positives (docstring bleed-through, cross-
+referencing comments mistaken for real code touches), all caught only by
+reading the actual method body before including anything in a specification.
+Treat every heuristic result as "worth checking," never as "verified."
+
+**2. Repository/module boundaries follow data ownership, not method-name
+grouping.** A split based on what methods happen to be named similarly will
+drift from what the data actually requires. Candidate D's original plan
+(pre-dating Candidate C) grouped "player profiles, relationships" into one
+store by naming convention; the corrected plan gave them separate stores
+because they own different tables and represent different bounded contexts.
+Building an explicit table-to-owner dependency graph before any split is
+mandatory, not optional cleanup.
+
+**3. Repositories own writes; facades own workflows.** A repository/store is
+responsible for persisting and retrieving its own table(s). A facade is
+responsible for sequencing multi-store operations, owning transaction
+boundaries, and answering queries that legitimately compose more than one
+store's data (a JOIN, a cross-table aggregate). A cross-store READ is not a
+boundary violation — it belongs on the facade, not forced into either store.
+
+---
+
 ## Core Data Structures
 
 ### Cell
