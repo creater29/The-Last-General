@@ -7,6 +7,55 @@
 
 ---
 
+## D014 Pre-Implementation Artifacts (this session, after the pre-audit above)
+
+Per supervisor requirement: three artifacts produced and added to
+DEFERRED_ITEMS.md D014 before any store file is written. No source code
+changed in this step — pure documentation/contract work, verified against
+actual current code, not assumed.
+
+**Artifact 1 — Repository Interface Specification.** Six stores (Episode,
+Observation, WorldModel, Doctrine, PlayerProfile, Relationship), each with
+exact current method signatures, owned tables, and dependencies. Building
+this caught one more real finding: `get_episodes_by_terrain_event()` does a
+genuine SQL JOIN across `episodes` and `observations` — classified at the
+facade level (same rule already applied to `summary()`), not inside either
+store.
+
+**Process note worth knowing:** an automated heuristic script (checking
+which tables each method's body references) produced several false
+positives — `upsert_doctrine` appearing to touch `observations`,
+`migrate_player_profiles` appearing to touch `observations`, the relationship
+methods appearing to touch `player_profiles`. All were traced to docstring
+bleed-through or comments referencing other tables for documentation
+consistency, not real code. Confirmed by reading each body directly before
+including anything in the spec — the heuristic was a lead to check, not a
+source of truth on its own.
+
+**Artifact 2 — Transaction Ownership Policy.** Verified `_get_conn()` caches
+one connection and returns it identically every call — this is *why*
+`log_episode()`'s single `commit()` already atomically covers both the
+episodes insert and every observations insert made inside
+`_extract_observations()`. Policy: all six stores share one injected
+connection; single-table methods keep self-committing as they do today;
+`log_episode()` stays the sole exception, calling `ObservationStore`'s
+non-committing extraction method directly and issuing one commit — exactly
+mirroring current behavior, no new transaction abstraction invented ahead of
+a second real use case.
+
+**Artifact 3 — LoggerFacade Contract.** `EpisodeLogger` stays the only
+external-facing class; zero call-site changes anywhere. Concrete
+verification proposed (not just a promise): capture `EpisodeLogger`'s full
+public method signature list before the split, add a test asserting it's
+identical after.
+
+**Full artifact text is in `state/DEFERRED_ITEMS.md` under "D014 —
+Pre-Implementation Artifacts."** Candidate D implementation still has NOT
+started — these are the proposed contracts, awaiting confirmation before any
+store file is written.
+
+---
+
 ## Candidate D pre-audit (this session, after Candidate C + post-completion review)
 
 Before starting Candidate D (logger repository split), ran the audit

@@ -334,6 +334,159 @@ force these into any single store.
 
 ---
 
+## D014 — Pre-Implementation Artifacts (required before any store file is written)
+
+Per supervisor review: repository boundaries must be defined as contracts
+before extraction begins, not discovered during it. All three items below
+are verified against actual current code (not assumed) before being written.
+
+---
+
+### Artifact 1 — Repository Interface Specification
+
+Exact current method signatures, grouped by store, per the dependency graph
+already built above.
+
+EpisodeStore
+  Owns: episode persistence and retrieval
+  Tables: episodes
+  Methods: log_episode(state), get_episode_count(player_id=None),
+    get_episode_by_id(episode_id), get_episodes(...)
+  Note: log_episode() also triggers observation extraction — see Transaction
+  Policy. Depends on ObservationStore for that sub-step only.
+
+ObservationStore
+  Owns: raw terrain-event evidence extracted from episodes
+  Tables: observations
+  Methods: _extract_observations(episode, timestamp) [called by EpisodeStore,
+    does not commit internally — see Transaction Policy],
+    get_observation_count(...), get_observations_by_terrain(...),
+    get_observation_patterns(...)
+  Depends on: none directly; is depended on by EpisodeStore
+
+WorldModelStore
+  Owns: learned environmental beliefs (terrain_knowledge)
+  Tables: terrain_knowledge
+  Methods: upsert_terrain_knowledge(...), get_terrain_knowledge(...),
+    get_all_terrain_knowledge()
+  Depends on: none. Read BY DoctrineExtractor (brain layer) but that is a
+  caller relationship across layers, not an intra-logger dependency.
+
+DoctrineStore
+  Owns: military doctrines (anonymous, generalized)
+  Tables: doctrines
+  Methods: upsert_doctrine(doctrine_id, abstraction_level, condition,
+    learned_effect, confidence, episode_count, derived_principle,
+    last_verified, decay_rate=0.005), get_doctrine_by_id(doctrine_id),
+    get_all_doctrines(), increment_doctrine_failure(doctrine_id)
+  Depends on: none — verified directly; an early heuristic scan suggested
+  an observations touch, confirmed false positive (docstring bleed from
+  the adjacent method, not an actual reference in upsert_doctrine's body).
+
+PlayerProfileStore
+  Owns: per-player tactical behaviour profiles
+  Tables: player_profiles
+  Methods: upsert_player_profile(server_id, player_id, first_seen, last_seen,
+    total_battles, win_count, loss_count, draw_count, preferred_units,
+    terrain_tendencies, aggression_index, adaptability_score, raw_data),
+    get_player_profile(server_id, player_id), get_all_player_profiles(...),
+    migrate_player_profiles()
+  Depends on: none — verified directly; an early heuristic scan suggested
+  an observations touch, confirmed false positive (the docstring literally
+  states "observations are untouched").
+
+RelationshipStore
+  Owns: psychological relationship state per opponent
+  Tables: player_general_relationship
+  Methods: upsert_relationship(server_id, player_id, data),
+    get_relationship(server_id, player_id), migrate_relationship_schema()
+  Depends on: none — verified directly; an early heuristic scan suggested
+  a player_profiles touch, confirmed false positive (an inline comment
+  referencing the player_profiles PRIMARY KEY pattern for documentation
+  consistency, not an actual table reference).
+
+LoggerFacade (EpisodeLogger itself — see Artifact 3)
+  Owns: cross-store composition and transaction boundaries
+  Tables: none directly
+  Methods verified as genuinely cross-store (not store-specific):
+    get_episodes_by_terrain_event(event_type, limit=50) — real SQL JOIN
+    between episodes and observations, confirmed by direct read (not a
+    false positive). Classified at facade level per the same rule already
+    applied to summary(): methods spanning more than one store's tables
+    live on the facade, not inside any single store.
+    summary() — reads across all six tables plus counter_doctrines.
+    result_distribution(), terrain_event_frequency() — verify table touches
+    at extraction time.
+  init_db(), close(), _connect(), _get_conn() stay at facade/DBManager
+  level (shared connection lifecycle — see Transaction Policy).
+
+counter_doctrines remains schema-only, zero methods, out of scope — no store
+is created for it. get_known_players() remains ORPHANED (W010) — its final
+store, if any, is decided when W010 is resolved during actual extraction.
+
+---
+
+### Artifact 2 — Transaction Ownership Policy
+
+Verified current behavior before deciding a policy (not assumed): `_get_conn()`
+lazily creates ONE `sqlite3.Connection`, cached on `self._conn`, returned
+identically on every call — confirmed by reading `_get_conn()` directly. This
+is why `log_episode()`'s single `conn.commit()` at the end already atomically
+covers both the episodes INSERT and every observations INSERT made inside
+`_extract_observations()` — they share one connection, and
+`_extract_observations()` deliberately does not commit on its own. This is an
+existing, working pattern, not something to invent from scratch.
+
+Policy (preserves current behavior, applies it as an explicit rule):
+1. All six stores share ONE underlying `sqlite3.Connection`, owned by
+   DBManager and injected into each store at construction
+   (e.g. EpisodeStore(conn), DoctrineStore(conn), ...). No store opens its
+   own connection.
+2. A store method that writes to only its own table commits at the end of
+   its own method — matches every current single-table method
+   (upsert_doctrine, upsert_relationship, etc.), requires no change.
+3. A method spanning multiple stores' tables — currently only log_episode()
+   (episodes + observations) — is not split so each store commits its own
+   piece. ObservationStore keeps a non-committing internal method
+   (_extract_observations, unchanged), and EpisodeStore.log_episode() calls
+   it, then issues the single commit() itself, exactly mirroring current
+   behavior. EpisodeStore needs a reference to ObservationStore to call that
+   method directly — not a full transaction/session object, since none
+   exists today and inventing one now would be speculative infrastructure
+   ahead of a second real use case.
+4. If a genuine second cross-store write operation is ever added, re-evaluate
+   whether a shared transaction abstraction is justified then — do not build
+   one now on the strength of a single existing case ("evidence before
+   implementation").
+
+---
+
+### Artifact 3 — LoggerFacade Contract
+
+EpisodeLogger remains the sole external-facing class. Every existing caller
+(brain/*.py, tests/*.py, scripts/*.py) continues to call
+logger.upsert_doctrine(...), logger.get_relationship(...), etc. — zero
+call-site changes. Internally, EpisodeLogger.__init__ constructs one shared
+connection via DBManager, then constructs all six stores with that
+connection, and each public method becomes a thin delegate to the
+corresponding store method (or, for facade-level methods identified in
+Artifact 1, executes the cross-store logic directly).
+
+Concrete verification mechanism (not just prose intent): before writing any
+store file, capture the full current public method signature list of
+EpisodeLogger (inspect.signature over every public method). After the split,
+add a test asserting the post-split EpisodeLogger's public method signatures
+are identical to the captured pre-split list. This gives the facade-stability
+promise an enforced test, not just a documented intention.
+
+---
+
+Candidate D implementation may begin once these three artifacts are reviewed
+and confirmed — this document is the proposal, not yet an approval to start
+writing store files.
+
+---
+
 ### D022 — IntentMetadata (replace hardcoded intent category tables)
 **Deferred from:** Candidate C architectural review — supervisor review flagged
   hardcoded intent categories in `_relationship_factor()` as non-scalable
