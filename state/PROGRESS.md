@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 355/355
+## Test Count: 365/365
 
 ---
 
@@ -160,7 +160,7 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 1/6 complete]
+### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 2/6 complete]
 
 Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
 transaction policy, facade contract, extraction order + completion criteria).
@@ -199,7 +199,41 @@ Episode+facade workflow → facade cleanup (one commit per phase).
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-**Phase 2 (PlayerProfileStore) — NOT STARTED.** Next up per extraction order.
+**Phase 2 (PlayerProfileStore) — COMPLETE ✅ (2026-06-28)**
+- `src/simulator/stores/player_profile_store.py` (new, 175 lines):
+  `PlayerProfileStore` — owns `player_profiles` exclusively.
+  `upsert_player_profile()`, `get_player_profile()`, `get_all_player_profiles()`,
+  `migrate_player_profiles()` — verbatim extraction, zero behavior change.
+- `src/simulator/logger.py`: imports `PlayerProfileStore`, constructs it in
+  `__init__` alongside `RelationshipStore`. All four facade methods now
+  thin delegations. Old inline implementation fully removed.
+  858 → 788 lines.
+- `tests/test_player_profile_store.py` (new, 10 tests): includes an explicit
+  Repository Independence test — `PlayerProfileStore(conn)` constructed and
+  fully exercised standalone.
+- **Spec correction found during this phase's audit:** `get_player_episodes()`
+  sits physically near the player-profile methods in `logger.py` and its
+  docstring says "Used by PlayerProfiler," but it queries the `episodes`
+  table only — it belongs to `EpisodeStore` (Phase 5), not
+  `PlayerProfileStore`. Same "who reads ≠ who owns" reasoning already
+  applied to `terrain_knowledge`/WorldModelStore. DEFERRED_ITEMS.md D014
+  Artifact 1 corrected; left untouched in `logger.py` for now (Phase 5's
+  territory).
+- Test count: 355 → 365 (all passing)
+- Integration test: 9/9 PASS, verified live (`encounters=29, trust=-0.4000`
+  through the new delegation path)
+
+**Definition of Done, verified for Phase 2:**
+- [✓] Store extracted
+- [✓] LoggerFacade delegates correctly
+- [✓] Repository Independence confirmed (standalone construction + 10 tests)
+- [✓] Old inline implementation removed (no duplication)
+- [✓] Full test suite passes (365/365)
+- [✓] Logger public API unchanged (facade-stability test)
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Phase 3 (DoctrineStore) — NOT STARTED.** Next up per extraction order.
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence

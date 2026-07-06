@@ -20,6 +20,7 @@ from typing import List, Optional, Dict, Any
 
 from simulator.battle import BattleState
 from simulator.stores.relationship_store import RelationshipStore
+from simulator.stores.player_profile_store import PlayerProfileStore
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ class EpisodeLogger:
         # table and is independently constructable/testable. See
         # state/DEFERRED_ITEMS.md D014 for the full extraction spec.
         self._relationship_store = RelationshipStore(self._conn)
+        self._player_profile_store = PlayerProfileStore(self._conn)
 
     # ------------------------------------------------------------------
     # Connection management
@@ -713,27 +715,7 @@ class EpisodeLogger:
         before player_profiler.py runs for the first time. Episodes and
         observations are untouched.
         """
-        conn = self._get_conn()
-        conn.execute("DROP TABLE IF EXISTS player_profiles")
-        conn.execute("""
-            CREATE TABLE player_profiles (
-                server_id          TEXT NOT NULL,
-                player_id          TEXT NOT NULL,
-                first_seen         TEXT,
-                last_seen          TEXT,
-                total_battles      INTEGER NOT NULL DEFAULT 0,
-                win_count          INTEGER NOT NULL DEFAULT 0,
-                loss_count         INTEGER NOT NULL DEFAULT 0,
-                draw_count         INTEGER NOT NULL DEFAULT 0,
-                preferred_units    JSON NOT NULL DEFAULT '{}',
-                terrain_tendencies JSON NOT NULL DEFAULT '{}',
-                aggression_index   REAL NOT NULL DEFAULT 0.5,
-                adaptability_score REAL NOT NULL DEFAULT 0.5,
-                data               JSON NOT NULL DEFAULT '{}',
-                PRIMARY KEY (server_id, player_id)
-            )
-        """)
-        conn.commit()
+        return self._player_profile_store.migrate_player_profiles()
 
     def get_player_episodes(self, player_id: str) -> List[Dict[str, Any]]:
         """
@@ -780,36 +762,12 @@ class EpisodeLogger:
         On conflict, replaces all fields — the profiler always recomputes
         from the full episode history so overwriting is safe.
         """
-        conn = self._get_conn()
-        conn.execute(
-            """
-            INSERT INTO player_profiles
-                (server_id, player_id, first_seen, last_seen,
-                 total_battles, win_count, loss_count, draw_count,
-                 preferred_units, terrain_tendencies,
-                 aggression_index, adaptability_score, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(server_id, player_id) DO UPDATE SET
-                first_seen         = excluded.first_seen,
-                last_seen          = excluded.last_seen,
-                total_battles      = excluded.total_battles,
-                win_count          = excluded.win_count,
-                loss_count         = excluded.loss_count,
-                draw_count         = excluded.draw_count,
-                preferred_units    = excluded.preferred_units,
-                terrain_tendencies = excluded.terrain_tendencies,
-                aggression_index   = excluded.aggression_index,
-                adaptability_score = excluded.adaptability_score,
-                data               = excluded.data
-            """,
-            (
-                server_id, player_id, first_seen, last_seen,
-                total_battles, win_count, loss_count, draw_count,
-                json.dumps(preferred_units), json.dumps(terrain_tendencies),
-                aggression_index, adaptability_score, json.dumps(raw_data),
-            ),
+        return self._player_profile_store.upsert_player_profile(
+            server_id, player_id, first_seen, last_seen,
+            total_battles, win_count, loss_count, draw_count,
+            preferred_units, terrain_tendencies,
+            aggression_index, adaptability_score, raw_data,
         )
-        conn.commit()
 
     def get_player_profile(
         self, server_id: str, player_id: str
@@ -817,18 +775,7 @@ class EpisodeLogger:
         """
         Return a player's profile for a specific server, or None.
         """
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM player_profiles WHERE server_id = ? AND player_id = ?",
-            (server_id, player_id),
-        ).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        d["preferred_units"]    = json.loads(d["preferred_units"])
-        d["terrain_tendencies"] = json.loads(d["terrain_tendencies"])
-        d["data"]               = json.loads(d["data"])
-        return d
+        return self._player_profile_store.get_player_profile(server_id, player_id)
 
     def get_all_player_profiles(
         self, server_id: Optional[str] = None
@@ -837,22 +784,4 @@ class EpisodeLogger:
         Return all profiles, optionally filtered by server.
         Ordered by total_battles descending (most experienced players first).
         """
-        conn = self._get_conn()
-        if server_id:
-            rows = conn.execute(
-                "SELECT * FROM player_profiles WHERE server_id = ? "
-                "ORDER BY total_battles DESC",
-                (server_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM player_profiles ORDER BY total_battles DESC"
-            ).fetchall()
-        result = []
-        for row in rows:
-            d = dict(row)
-            d["preferred_units"]    = json.loads(d["preferred_units"])
-            d["terrain_tendencies"] = json.loads(d["terrain_tendencies"])
-            d["data"]               = json.loads(d["data"])
-            result.append(d)
-        return result
+        return self._player_profile_store.get_all_player_profiles(server_id)

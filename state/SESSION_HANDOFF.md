@@ -2,8 +2,70 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 355/355
+## Tests: 365/365
 ## Handoff to: next session
+
+---
+
+## Candidate D Phase 2 — PlayerProfileStore extraction (COMPLETE)
+
+Same protocol as Phase 1, exactly. Read the four live methods
+(`migrate_player_profiles`, `upsert_player_profile`, `get_player_profile`,
+`get_all_player_profiles`) fresh from `logger.py` before writing anything —
+not reused from the DEFERRED_ITEMS D014 Artifact 1 snapshot.
+
+**Real finding during the read-through:** `get_player_episodes()` sits
+physically between `migrate_player_profiles()` and `upsert_player_profile()`
+in the file, and its docstring says "Used by PlayerProfiler" — but its body
+only queries the `episodes` table. It belongs to `EpisodeStore` (Phase 5),
+not `PlayerProfileStore`, despite sitting right next to these methods and
+despite its stated caller. Corrected Artifact 1 in DEFERRED_ITEMS.md;
+left the method itself untouched in `logger.py` (not this phase's job).
+
+**Process note — MCP server instability this session:** Desktop Commander
+went unresponsive twice during this phase's verification steps (even a
+trivial `echo` command timed out identically both times). Both times: did
+not guess at results, did not report anything as passing without direct
+confirmation, told the user plainly what was verified vs. unknown, and
+re-ran the affected step fresh once the server recovered. The second full
+test suite run (365/365, clean summary line, no stall) is the one this
+phase's completion is based on — not the earlier run that stalled mid-output.
+
+**On the "Repository parity tests" recommendation from supervisor review:**
+considered and consciously not added as a new mechanism. The pre-existing
+facade-level tests in `test_logger.py` (unmodified since before Phase 1)
+already serve this function — they exercise the same facade methods,
+unchanged, and would fail on any behavioral drift. A separate old-vs-new
+comparison harness would be redundant and would require temporarily keeping
+the old implementation around, which conflicts with "remove immediately,
+don't duplicate" — a principle the same review praised two paragraphs
+earlier. Noted this reasoning explicitly rather than silently skipping the
+recommendation or mechanically implementing something redundant.
+
+**Verification, in order:** new store's 10 tests standalone first → facade
+wiring → full suite (365/365, confirmed cleanly after an MCP stall required
+a re-run) → integration test verbose, confirmed real numbers moved correctly
+(`encounters=29, trust=-0.4000`) → git status checked before committing.
+
+**Files touched:**
+- `src/simulator/stores/player_profile_store.py` (new, 175 lines)
+- `src/simulator/logger.py` (import, construction, four methods reduced to
+  delegations, old inline SQL removed — 858 → 788 lines)
+- `tests/test_player_profile_store.py` (new, 10 tests)
+- `state/DEFERRED_ITEMS.md` (Artifact 1 corrected — `get_player_episodes()`
+  moved to EpisodeStore's method list)
+- `state/PROGRESS.md`, `state/SESSION_HANDOFF.md`
+
+**Next: Phase 3 — DoctrineStore.** Same pattern: read
+`upsert_doctrine`/`get_doctrine_by_id`/`get_all_doctrines`/
+`increment_doctrine_failure` fresh from the live `logger.py` file before
+writing anything — do not reuse Artifact 1's signatures without
+re-verifying, exactly as this phase found a real discrepancy
+(`get_player_episodes`) that the original audit missed. Watch specifically
+for whether `increment_doctrine_failure`'s decay-rate formula references
+anything outside the `doctrines` table (it shouldn't, per the verified
+dependency graph, but verify directly rather than trust the graph blindly —
+same discipline that caught the `get_player_episodes` miscategorization).
 
 ---
 

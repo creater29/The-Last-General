@@ -352,7 +352,12 @@ EpisodeStore
   Tables: episodes
   Methods: insert_episode_row(episode, timestamp) [no commit — see Transaction
     Policy, revised], get_episode_count(player_id=None),
-    get_episode_by_id(episode_id), get_episodes(...)
+    get_episode_by_id(episode_id), get_episodes(...),
+    get_player_episodes(player_id) [CORRECTED during Phase 2 audit — this
+      method queries the episodes table only, despite its docstring saying
+      "Used by PlayerProfiler." Who reads a table is not who owns it — same
+      reasoning already applied to terrain_knowledge/WorldModelStore. Belongs
+      here, not PlayerProfileStore, even though PlayerProfiler is its caller.]
   Depends on: none — REVISED after Repository Independence requirement
     (supervisor review). log_episode() as a whole (insert episode row +
     trigger observation extraction + commit) is a WORKFLOW spanning two
