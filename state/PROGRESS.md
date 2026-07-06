@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 365/365
+## Test Count: 377/377
 
 ---
 
@@ -160,7 +160,7 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 2/6 complete]
+### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 3/6 complete]
 
 Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
 transaction policy, facade contract, extraction order + completion criteria).
@@ -233,7 +233,57 @@ Episode+facade workflow → facade cleanup (one commit per phase).
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-**Phase 3 (DoctrineStore) — NOT STARTED.** Next up per extraction order.
+**Phase 3 (DoctrineStore) — COMPLETE ✅ (2026-06-28)**
+
+First "behavior-critical" extraction — DoctrineStore sits directly in
+DecisionEngine's read path, per supervisor review requiring explicit
+behavioral-equivalence verification, not just passing tests.
+
+**Behavior-critical invariant found and preserved:** `upsert_doctrine()`'s
+`ON CONFLICT` clause deliberately does NOT touch `failure_count` or
+`exceptions` — only `confidence`, `episode_count`, `derived_principle`,
+`last_verified` update on conflict. This means accumulated failure feedback
+survives re-extraction. Verified in 2 dedicated tests
+(`test_upsert_on_conflict_does_not_reset_failure_count`,
+`test_upsert_on_conflict_updates_only_specific_fields`) AND directly against
+the live production DB after this phase's integration run: `failure_count=102`
+survived a fresh `extract_doctrines()` re-upsert pass without being reset.
+
+- `src/simulator/stores/doctrine_store.py` (new, 157 lines): `DoctrineStore`
+  — owns `doctrines` exclusively. `upsert_doctrine()`, `get_doctrine_by_id()`,
+  `get_all_doctrines()`, `increment_doctrine_failure()` — verbatim
+  extraction, zero behavior change. No `migrate_*_schema()` method — unlike
+  Relationship/PlayerProfile, doctrines' schema never needed a repair; that
+  method existed on the first two for specific historical reasons (R006,
+  encounters field) that never applied here. Initial `CREATE TABLE` stays
+  a DBManager/facade concern (`init_db()`).
+- `src/simulator/logger.py`: imports `DoctrineStore`, constructs it in
+  `__init__` alongside the first two stores. All four facade methods now
+  thin delegations. Old inline implementation fully removed.
+  789 → 739 lines.
+- `tests/test_doctrine_store.py` (new, 12 tests): Repository Independence
+  test, plus the two behavior-critical invariant tests above, plus
+  `decay_rate` formula verification (`failure_count / (episode_count +
+  failure_count)`) with exact float comparisons.
+- Test count: 365 → 377 (all passing)
+- Integration test: 9/9 PASS. Both doctrine-specific criteria explicitly
+  confirmed: "Doctrine influence detected (30 consultations)" and "Doctrine
+  DB updated after loss (30 failure_count increments applied)" — same
+  magnitudes as pre-Phase-3 runs, confirming behavioral equivalence.
+
+**Definition of Done, verified for Phase 3:**
+- [✓] Store extracted
+- [✓] LoggerFacade delegates correctly
+- [✓] Repository Independence confirmed (standalone construction + 12 tests)
+- [✓] Old inline implementation removed (no duplication)
+- [✓] Full test suite passes (377/377)
+- [✓] Logger public API unchanged (facade-stability test)
+- [✓] Behavioral equivalence verified against live production DB (not just
+  unit tests) — the specific additional bar this phase was held to
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Phase 4 (ObservationStore) — NOT STARTED.** Next up per extraction order.
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence

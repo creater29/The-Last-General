@@ -21,6 +21,7 @@ from typing import List, Optional, Dict, Any
 from simulator.battle import BattleState
 from simulator.stores.relationship_store import RelationshipStore
 from simulator.stores.player_profile_store import PlayerProfileStore
+from simulator.stores.doctrine_store import DoctrineStore
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,7 @@ class EpisodeLogger:
         # state/DEFERRED_ITEMS.md D014 for the full extraction spec.
         self._relationship_store = RelationshipStore(self._conn)
         self._player_profile_store = PlayerProfileStore(self._conn)
+        self._doctrine_store = DoctrineStore(self._conn)
 
     # ------------------------------------------------------------------
     # Connection management
@@ -620,55 +622,22 @@ class EpisodeLogger:
         accumulate. failure_count and exceptions are left unchanged so
         accumulated feedback is not erased by a re-extraction.
         """
-        conn = self._get_conn()
-        conn.execute(
-            """
-            INSERT INTO doctrines
-                (id, abstraction_level, condition, learned_effect, confidence,
-                 episode_count, failure_count, derived_principle, exceptions,
-                 last_verified, decay_rate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                confidence        = excluded.confidence,
-                episode_count     = excluded.episode_count,
-                derived_principle = excluded.derived_principle,
-                last_verified     = excluded.last_verified
-            """,
-            (
-                doctrine_id, abstraction_level, condition, learned_effect,
-                confidence, episode_count, 0, derived_principle,
-                "[]", last_verified, decay_rate,
-            ),
+        return self._doctrine_store.upsert_doctrine(
+            doctrine_id, abstraction_level, condition, learned_effect,
+            confidence, episode_count, derived_principle, last_verified,
+            decay_rate,
         )
-        conn.commit()
 
     def get_doctrine_by_id(self, doctrine_id: str) -> Optional[Dict[str, Any]]:
         """Return one doctrine row by id, or None if not found."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM doctrines WHERE id = ?", (doctrine_id,)
-        ).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        d["exceptions"] = json.loads(d["exceptions"])
-        return d
+        return self._doctrine_store.get_doctrine_by_id(doctrine_id)
 
     def get_all_doctrines(self) -> List[Dict[str, Any]]:
         """
         Return all doctrine rows ordered by confidence descending.
         Used by DoctrineExtractor.get_doctrines().
         """
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM doctrines ORDER BY confidence DESC"
-        ).fetchall()
-        result = []
-        for row in rows:
-            d = dict(row)
-            d["exceptions"] = json.loads(d["exceptions"])
-            result.append(d)
-        return result
+        return self._doctrine_store.get_all_doctrines()
 
     def increment_doctrine_failure(self, doctrine_id: str) -> bool:
         """
@@ -683,25 +652,7 @@ class EpisodeLogger:
 
         Returns True if the doctrine was found and updated, False otherwise.
         """
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT failure_count, episode_count FROM doctrines WHERE id = ?",
-            (doctrine_id,),
-        ).fetchone()
-
-        if not row:
-            return False
-
-        new_failure = row["failure_count"] + 1
-        total       = row["episode_count"] + new_failure
-        new_decay   = round(new_failure / max(1, total), 6)
-
-        conn.execute(
-            "UPDATE doctrines SET failure_count = ?, decay_rate = ? WHERE id = ?",
-            (new_failure, new_decay, doctrine_id),
-        )
-        conn.commit()
-        return True
+        return self._doctrine_store.increment_doctrine_failure(doctrine_id)
 
     # ------------------------------------------------------------------
     # Player profiles (written by PlayerProfiler)

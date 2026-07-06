@@ -2,8 +2,79 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 365/365
+## Tests: 377/377
 ## Handoff to: next session
+
+---
+
+## Candidate D Phase 3 — DoctrineStore extraction (COMPLETE)
+
+Same protocol as Phases 1-2, plus additional scrutiny: supervisor review
+flagged this as the first "behavior-critical" extraction (DoctrineStore
+sits directly in DecisionEngine's read path) and required explicit
+behavioral-equivalence verification, not just passing tests.
+
+**Behavior-critical invariant found during the read-through, before writing
+anything:** `upsert_doctrine()`'s `ON CONFLICT` clause deliberately excludes
+`failure_count` and `exceptions` from the update — only `confidence`,
+`episode_count`, `derived_principle`, `last_verified` change. This means a
+re-extraction pass (which runs every integration test via
+`extract_doctrines()`) never erases accumulated failure feedback from
+`increment_doctrine_failure()`. Wrote two dedicated tests for this exact
+invariant, and separately confirmed it against the LIVE production DB after
+running the integration test: `failure_count=102` (accumulated across many
+prior sessions) survived a fresh re-upsert without being reset to 0.
+
+**Caught my own error before it mattered:** while writing `DoctrineStore`,
+I added `return True` at the end of `increment_doctrine_failure()` based on
+inferring from the docstring — my last direct read of the live file had cut
+off exactly at `conn.commit()` and I never actually saw the return statement.
+Went back and verified the live file directly before trusting my own draft.
+It happened to be correct, but the process gap (inferring instead of
+verifying) was real and worth catching regardless of the outcome.
+
+**Structural difference from Phases 1-2, verified not assumed:**
+`DoctrineStore` has no `migrate_*_schema()` method. Checked whether this was
+an inconsistency to fix — it isn't. `migrate_relationship_schema()` and
+`migrate_player_profiles()` exist for specific historical repair reasons
+(R006, the `encounters` field) that never applied to `doctrines` — its
+schema was correct from the original `CREATE TABLE`. Initial schema creation
+stays a DBManager/facade concern (`init_db()`) per Artifact 1. The
+standalone test file provides its own minimal schema-creation helper
+(mirroring `init_db()`'s exact CREATE TABLE, copied not invented) rather
+than adding an unneeded method to the store just for test convenience.
+
+**Verification, in order:** 12 standalone tests first (including the two
+behavior-critical invariant tests) → facade wiring → full suite (377/377)
+→ integration test verbose, both doctrine-specific success criteria
+explicitly confirmed at the same magnitudes as pre-Phase-3 runs → direct
+live-DB inspection of `failure_count`/`confidence`/`decay_rate` after the
+run, specifically to verify the conflict-clause invariant held in production
+data, not just in an isolated in-memory test.
+
+**Files touched:**
+- `src/simulator/stores/doctrine_store.py` (new, 157 lines)
+- `src/simulator/logger.py` (import, construction, four methods reduced to
+  delegations, old inline SQL removed — 789 → 739 lines)
+- `tests/test_doctrine_store.py` (new, 12 tests)
+- `state/PROGRESS.md`, `state/SESSION_HANDOFF.md`
+
+**Next: Phase 4 — ObservationStore.** Per Artifact 4, this is the one phase
+with a real intra-logger structural coupling to watch for: the ORIGINAL
+`log_episode()` calls `_extract_observations()` directly. Per the Repository
+Independence revision (already made to the spec before Phase 1 began),
+`ObservationStore` itself should have NO reference to `EpisodeStore` — the
+orchestration moves to the facade in Phase 5, not here. For Phase 4 alone,
+extract `_extract_observations()` (proposed rename: `insert_observations()`)
+plus the three read methods (`get_observation_count`,
+`get_observations_by_terrain`, `get_observation_patterns`) into
+`ObservationStore`, keep it fully independent, and leave the facade's
+`log_episode()` calling into it via a temporary direct reference until
+Phase 5 formally moves that orchestration. Read every method fresh from the
+live file before writing anything — do not reuse Artifact 1's signatures
+without re-verifying, per the pattern that already caught two real
+discrepancies (`get_player_episodes` in Phase 2, the `return True` inference
+gap in Phase 3).
 
 ---
 
