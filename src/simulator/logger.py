@@ -22,6 +22,7 @@ from simulator.battle import BattleState
 from simulator.stores.relationship_store import RelationshipStore
 from simulator.stores.player_profile_store import PlayerProfileStore
 from simulator.stores.doctrine_store import DoctrineStore
+from simulator.stores.observation_store import ObservationStore
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,7 @@ class EpisodeLogger:
         self._relationship_store = RelationshipStore(self._conn)
         self._player_profile_store = PlayerProfileStore(self._conn)
         self._doctrine_store = DoctrineStore(self._conn)
+        self._observation_store = ObservationStore(self._conn)
 
     # ------------------------------------------------------------------
     # Connection management
@@ -227,59 +229,14 @@ class EpisodeLogger:
         )
 
         # Extract terrain observations from this episode
-        self._extract_observations(episode, timestamp)
+        # (facade composes EpisodeStore-equivalent insert + ObservationStore
+        # insert into one atomic transaction — see Transaction Policy,
+        # DEFERRED_ITEMS D014 Artifact 2. ObservationStore itself has no
+        # reference to episodes — this composition lives here, on the facade.)
+        self._observation_store.insert_observations(episode, timestamp)
 
         conn.commit()
         return episode["id"]
-
-    def _extract_observations(self, episode: dict, timestamp: str) -> None:
-        """
-        Pull terrain events from an episode and store as observations.
-        These are the raw evidence the doctrine extractor (Stage 2) will use.
-
-        Each terrain event becomes one observation:
-        - terrain_context: what terrain was present
-        - action_taken: what intent was being executed
-        - observed_effect: what happened (ice_break, wall_collapse, etc.)
-        """
-        conn = self._get_conn()
-        episode_id = episode["id"]
-
-        terrain_events = episode.get("terrain_events", [])
-        general_intents = episode.get("general_intents", [])
-
-        # Match events to the intent that was active that turn
-        for i, event in enumerate(terrain_events):
-            event_type = event.get("event_type")
-            if not event_type:
-                continue
-
-            # Best-effort intent matching by position
-            intent = general_intents[i] if i < len(general_intents) else "unknown"
-            terrain = event.get("terrain_at_site", "unknown")
-            trigger = event.get("triggered_by_type", "unknown")
-
-            obs_id = str(uuid.uuid4())[:12]
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO observations
-                    (id, episode_id, timestamp, terrain_context,
-                     action_taken, observed_effect,
-                     confidence, last_verified, decay_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    obs_id,
-                    episode_id,
-                    timestamp,
-                    f"{terrain}+{trigger}",   # e.g. "frozen_lake+cavalry"
-                    intent,
-                    event_type,               # e.g. "ice_break"
-                    1.0,
-                    timestamp,
-                    0.01,
-                ),
-            )
 
     # ------------------------------------------------------------------
     # Episode retrieval
@@ -368,8 +325,7 @@ class EpisodeLogger:
     # ------------------------------------------------------------------
 
     def get_observation_count(self) -> int:
-        conn = self._get_conn()
-        return conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+        return self._observation_store.get_observation_count()
 
     def get_observations_by_terrain(
         self,
@@ -381,17 +337,7 @@ class EpisodeLogger:
         e.g. terrain_context = "frozen_lake+cavalry"
         Used by doctrine extractor to find patterns.
         """
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT * FROM observations
-            WHERE terrain_context = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (terrain_context, limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        return self._observation_store.get_observations_by_terrain(terrain_context, limit)
 
     def get_observation_patterns(self, min_count: int = 5) -> List[dict]:
         """
@@ -399,20 +345,7 @@ class EpisodeLogger:
         at least min_count times. These are candidates for doctrine formation.
         This is the key query the doctrine extractor will use.
         """
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT terrain_context, observed_effect,
-                   COUNT(*) as count,
-                   AVG(confidence) as avg_confidence
-            FROM observations
-            GROUP BY terrain_context, observed_effect
-            HAVING COUNT(*) >= ?
-            ORDER BY count DESC
-            """,
-            (min_count,),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        return self._observation_store.get_observation_patterns(min_count)
 
     # ------------------------------------------------------------------
     # Player profile management

@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 377/377
+## Test Count: 389/389
 
 ---
 
@@ -160,7 +160,7 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 3/6 complete]
+### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 4/6 complete]
 
 Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
 transaction policy, facade contract, extraction order + completion criteria).
@@ -283,7 +283,71 @@ survived a fresh `extract_doctrines()` re-upsert pass without being reset.
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-**Phase 4 (ObservationStore) — NOT STARTED.** Next up per extraction order.
+**Phase 4 (ObservationStore) — COMPLETE ✅ (2026-06-28)**
+
+More significant than Phases 1-3: this phase touches `log_episode()` itself,
+the central write path every battle goes through — not an isolated CRUD
+method.
+
+**Repository Independence revision (decided before Phase 1, exercised for
+the first time here):** `ObservationStore` has NO reference to
+`EpisodeStore`/episodes. `insert_observations()` (renamed from the private
+`_extract_observations()`) does not commit internally — this is deliberate,
+not an oversight, because `observations.episode_id` has a
+`FOREIGN KEY REFERENCES episodes(id)`, enforced in production
+(`PRAGMA foreign_keys=ON`). The facade's `log_episode()` still owns the
+full workflow: insert the episode row, call
+`self._observation_store.insert_observations(...)`, then commit once —
+exactly matching the pre-existing atomic behavior, with the facade
+composing two independent stores rather than one store depending on another.
+
+- `src/simulator/stores/observation_store.py` (new, 160 lines):
+  `ObservationStore` — owns `observations` exclusively. No
+  `migrate_*_schema()` — same reasoning as `DoctrineStore` (schema correct
+  from original creation, no repair ever needed).
+- `src/simulator/logger.py`: imports `ObservationStore`, constructs it in
+  `__init__`. `log_episode()`'s body now calls
+  `self._observation_store.insert_observations(...)` instead of
+  `self._extract_observations(...)`; the old private method is fully
+  removed (not just delegated — it no longer exists as a separate method).
+  Three read methods reduced to delegations. Caught and fixed a leftover
+  dangling `return` line during the edit (verified via full suite before
+  and after). 739 → ~672 lines (net, after this and the dangling-line fix).
+- `tests/test_observation_store.py` (new, 12 tests): includes a specific
+  behavior-critical test (`test_insert_does_not_commit_internally`) that
+  uses two separate connections to the same file-backed DB to directly
+  prove the method doesn't commit — not just asserting on return values.
+- Test count: 377 → 389 (all passing)
+- Integration test: 9/9 PASS. Went further than "tests pass" given this
+  phase's significance: ran a precise before/after delta check against the
+  live production DB — `episodes: 12021→12022 (+1), observations:
+  151338→151348 (+10)` — confirming the exact expected atomic composition
+  (one battle logged via the integration script → one episode row + ten
+  observation rows, matching the actual number of terrain events in that
+  battle, not a coincidental pass).
+
+**Definition of Done, verified for Phase 4:**
+- [✓] Store extracted
+- [✓] LoggerFacade delegates correctly (including the composed
+  `log_episode()` workflow, not just simple CRUD delegation)
+- [✓] Repository Independence confirmed (standalone construction + 12
+  tests, zero reference to EpisodeStore/episodes)
+- [✓] Old inline implementation removed (`_extract_observations()` no
+  longer exists as a separate method anywhere)
+- [✓] Full test suite passes (389/389)
+- [✓] Logger public API unchanged (facade-stability test)
+- [✓] Behavioral equivalence verified against live production DB via
+  precise before/after delta, not just aggregate counts
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Phase 5 (EpisodeStore + facade workflow) — NOT STARTED.** Next up per
+extraction order. This is where `log_episode()`'s remaining inline SQL
+(the `episodes` table INSERT itself) moves into `EpisodeStore`, and the
+facade's `log_episode()` becomes purely orchestration: call
+`EpisodeStore.insert_episode_row()`, call
+`ObservationStore.insert_observations()` (already done, this phase),
+commit once.
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence

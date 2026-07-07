@@ -2,8 +2,78 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 377/377
+## Tests: 389/389
 ## Handoff to: next session
+
+---
+
+## Candidate D Phase 4 — ObservationStore extraction (COMPLETE)
+
+More significant than Phases 1-3: this is the first phase to touch
+`log_episode()` itself — the central write path every battle goes through,
+not an isolated CRUD method.
+
+**The Repository Independence revision (decided before Phase 1 even began,
+during the "one instruction above all others" review round) was exercised
+for real here for the first time.** `ObservationStore` has zero reference
+to episodes or `EpisodeStore`. `insert_observations()` (public rename of
+the old private `_extract_observations()`) does not commit internally.
+Verified this is deliberate, not an oversight, by finding
+`observations.episode_id FOREIGN KEY REFERENCES episodes(id)`, enforced in
+production via `PRAGMA foreign_keys=ON` in `_connect()`. The facade's
+`log_episode()` still does: insert episode row → call
+`self._observation_store.insert_observations(...)` → commit once — same
+composition as before, just now explicitly the facade orchestrating two
+independent stores rather than one store depending on another.
+
+**Caught a real mistake mid-edit, not after:** during the three-method
+replacement (`get_observation_count`/`get_observations_by_terrain`/
+`get_observation_patterns`), a leftover `return [dict(row) for row in
+rows]` line survived from the old body and sat as dead, unreachable code
+right after the new delegation. Caught by reading the edit_block's own
+output immediately after the call, before moving on — not by a later test
+failure. Fixed before running the suite.
+
+**Verification went beyond the standard bar given this phase's centrality:**
+ran a precise before/after delta check against the LIVE production DB —
+`episodes: 12021→12022 (+1), observations: 151338→151348 (+10)` — for one
+specific integration test run. This confirms the atomic composition
+produced exactly one episode row and exactly the right number of
+observation rows for that one battle's actual terrain events, not just
+"the totals went up by some amount." Also confirmed this matches the
+integration script's actual design (only Battle 1/seed=42 calls
+`log_episode()`; the feedback battle only calls `update_after_battle()`/
+`record_battle_outcome()`), rather than assuming both battles should have
+incremented the episode count.
+
+**Files touched:**
+- `src/simulator/stores/observation_store.py` (new, 160 lines)
+- `src/simulator/logger.py` (import, construction, `log_episode()`'s body
+  updated to call the new store, `_extract_observations()` removed
+  entirely — not delegated, deleted, since it's now `ObservationStore`'s
+  public method — three read methods reduced to delegations, one leftover
+  dangling line caught and removed)
+- `tests/test_observation_store.py` (new, 12 tests, including a
+  two-connection test that directly proves non-commit behavior rather than
+  inferring it from return values)
+- `state/PROGRESS.md`, `state/SESSION_HANDOFF.md`
+
+**Next: Phase 5 — EpisodeStore + facade workflow restructure.** This is
+the phase the entire Repository Independence revision was originally
+designed for. Per D014 Artifact 2 (Transaction Policy, revised): extract
+the `episodes` table INSERT itself into `EpisodeStore.insert_episode_row()`
+(no commit), and rewrite the facade's `log_episode()` to be pure
+orchestration: call `EpisodeStore.insert_episode_row()`, call
+`self._observation_store.insert_observations()` (already correct, from this
+phase), commit once. `EpisodeStore` itself must have zero reference to
+`ObservationStore` — verify this with the same standalone-independence
+test pattern as every prior phase. Also: `get_player_episodes()` moves here
+too (the Phase 2 finding — it queries `episodes` only, despite being used
+by `PlayerProfiler`). Read every method fresh from the live file before
+writing anything, per the pattern that has now caught something worth
+catching in three of four phases so far (get_player_episodes
+miscategorization, a return-statement inference gap, a leftover dangling
+line) — this discipline is earning its cost.
 
 ---
 
