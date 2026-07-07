@@ -634,6 +634,34 @@ forced into either `EpisodeStore` or `ObservationStore`.
 
 ---
 
+### D023 — EpisodeLogger.__init__ store construction registry
+**Deferred from:** Candidate D Phase 3 supervisor review
+**Current state:** `EpisodeLogger.__init__` constructs each store manually:
+```python
+self._relationship_store = RelationshipStore(self._conn)
+self._player_profile_store = PlayerProfileStore(self._conn)
+self._doctrine_store = DoctrineStore(self._conn)
+```
+Perfectly acceptable at 3 stores. By Phase 6 there will be 6
+(Relationship, PlayerProfile, Doctrine, Observation, Episode, WorldModel),
+at which point `__init__` becomes a manual dependency list of six near-
+identical lines.
+**Why deferred:** No evidence yet that this is a real problem — it's a
+one-time constructor cost, not a runtime cost, and six explicit lines is
+still readable. "Evidence before implementation" cuts against introducing
+a registry/dependency-container pattern now on the strength of a review
+comment alone, with no measured maintenance pain yet.
+**When to address:** Only after Phase 6 (facade cleanup) is complete —
+revisit then and judge from the actual six-store `__init__`, not from
+speculation about what it might look like.
+**What to consider then (not before):** a small internal registry
+(`self._stores = {name: StoreClass(self._conn) for ...}`) OR simply leaving
+it as six explicit lines if it's still readable at that point. Do not
+introduce a generic plugin/registry system speculatively — match whatever
+the actual Phase 6 `__init__` looks like.
+
+---
+
 ## Open — Address During Stage 3+ / 4
 
 ---
