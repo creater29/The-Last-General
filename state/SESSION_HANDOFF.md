@@ -9,11 +9,13 @@
 
 ## ⚠️ PUSH PENDING — infrastructure note, not a project/architecture concern
 
-Local `main` is 2 commits ahead of `origin/main`:
+Local `main` is 4 commits ahead of `origin/main`:
 - `7ff3006` — Candidate D Phase 5 (EpisodeStore)
 - `e6dd9ab` — D014 documentation correction (Artifact 1/4 separation)
+- `f1f426c` — Post-Phase-5 review follow-ups (push-pending note, D024 wording)
+- `225a29b` — D025 (store docstring narrative, deferred)
 
-`git push` has failed twice with a credential/authentication error
+`git push` has failed four times with a credential/authentication error
 ("could not read Password... Device not configured"). This is an
 infrastructure issue, not a code or architecture problem — the commits
 exist safely on local `main`, working tree is clean, repository history is
