@@ -735,6 +735,43 @@ delta check if any write behavior is touched.
 
 ---
 
+### D025 — Store module docstrings carry architectural narrative
+**Raised by:** Post-Phase-5 supervisor review
+**Current state:** The five store modules' docstrings (`relationship_store.py`,
+`player_profile_store.py`, `doctrine_store.py`, `observation_store.py`,
+`episode_store.py`) include not just ownership/API/behavioral-contract
+documentation but also architectural narrative — which phase built them,
+cross-references to "supervisor reviews," full anti-pattern walkthroughs.
+Confirmed accurate by direct read of `episode_store.py`'s docstring before
+accepting the characterization, not just trusting the review's description.
+**Why not acted on now:** The reviewer applied "no measurable pain yet,
+good future candidate, bad current candidate" to three other findings in
+the same review (facade-owned schema creation, `summary()`'s direct SQL,
+`terrain_knowledge` staying in `logger.py`) but did not apply that same
+evidence bar to this one. It should apply equally here: there is no
+demonstrated instance of docstring content actually drifting out of sync
+with D014 — the risk is theoretical. Editing all five store files to trim
+architectural narrative is real file-touching work with real risk (a
+trimming pass could accidentally clip a behavior-critical warning — e.g.
+`episode_store.py`'s FK-constraint explanation or its commit-ordering
+anti-pattern warning — while removing "narrative"). Phase 6 is explicitly
+scoped as cleanup, not redesign, by this same review chain — a five-file
+docstring rewrite for a stylistic reason doesn't fit that scope.
+**Re-evaluation trigger (not a timeline):** Address if/when either:
+  - A docstring is found to have actually drifted from D014's account of
+    the same decision (the concrete failure mode this entry exists to
+    watch for), or
+  - A store's docstring needs a substantive edit anyway (e.g. its behavior
+    changes) — fold a trim into that edit rather than doing a standalone
+    pass
+**What to do when triggered:** Keep in each docstring: ownership (which
+table), public API summary, and behavioral contracts that a caller must
+know to use the class correctly (e.g. "does not commit internally"). Move
+to ARCHITECTURE.md/D014 only: which phase/session built it, cross-session
+narrative, "why we chose X over Y" reasoning already captured elsewhere.
+
+---
+
 ## Open — Address During Stage 3+ / 4
 
 ---
