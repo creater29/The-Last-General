@@ -2,8 +2,80 @@
 
 ## Date: 2026-06-28
 ## Stage: 3 (Live Pipeline)
-## Tests: 389/389
+## Tests: 402/402
 ## Handoff to: next session
+
+---
+
+## Candidate D Phase 5 — EpisodeStore + facade workflow restructure (COMPLETE)
+
+The phase the entire Repository Independence revision (decided before
+Phase 1 even began) was designed for. Both supervisor reviews flagged this
+as the highest remaining risk in Candidate D — it owns the transaction
+boundary for the whole logging pipeline.
+
+**Core transformation:** `log_episode()` had inline SQL for the episode
+INSERT, then called `_extract_observations()` (already moved to
+`ObservationStore` in Phase 4), then committed once. That inline SQL is now
+`EpisodeStore.insert_episode_row()` — non-committing, exactly like
+`ObservationStore.insert_observations()`. The facade's `log_episode()` is
+now pure orchestration: no inline SQL at all, just two store calls and one
+commit. This is exactly the anti-pattern both reviews warned against
+avoided: never `insert_episode_row() → commit(); insert_observations() →
+commit()` (two transactions, breaks atomicity, violates the FK constraint
+found in Phase 4) — always both inserts, then one commit, on the facade.
+
+**MCP stall mid-edit, handled correctly:** the `edit_block` call
+constructing `EpisodeStore` in `__init__` timed out with no result. Did not
+assume it landed or failed either way. Once the server recovered, read the
+live file directly first — confirmed the line was genuinely missing — then
+redid the edit correctly. This is the same discipline used for every prior
+MCP stall this session: verify the actual state, never guess.
+
+**Caught a flaw in my own test, not the implementation:** the Repository
+Independence check for `EpisodeStore` initially did a raw string search for
+"ObservationStore" across the whole file — which flagged the module's own
+docstring (which legitimately explains the design rationale by name) as if
+it were a real import. Rewrote the test to walk the AST and check actual
+`Import`/`ImportFrom` nodes instead of searching raw text. Same class of
+mistake as the heuristic false-positives from the original D014 audit
+earlier this session — a blunt text-matching check flagging documentation
+as if it were code.
+
+**Verification, most rigorous yet given this phase's centrality:**
+13 standalone tests first (including a direct two-connection proof that
+`insert_episode_row()` doesn't commit, and an explicit atomic-composition
+test simulating the exact facade workflow) → facade wiring → full suite
+(402/402) → integration test 9/9 → precise before/after delta against live
+production DB (`episodes: 12023→12024 (+1), observations: 151358→151368
+(+10)` — identical pattern to Phase 4) → verified `get_player_episodes()`
+(the Phase 2 finding, now resolved) through its actual real caller
+(`PlayerProfiler`, not just isolated tests): 24 real episodes, correctly
+enriched, correctly ordered ASC.
+
+**Files touched:**
+- `src/simulator/stores/episode_store.py` (new, 170 lines)
+- `src/simulator/logger.py` (import, construction, `log_episode()`
+  rewritten as pure orchestration, five methods reduced to delegations,
+  `get_episodes_by_terrain_event()` correctly left untouched — genuine
+  cross-store JOIN, facade-level per Artifact 1)
+- `tests/test_episode_store.py` (new, 13 tests)
+- `state/PROGRESS.md`, `state/SESSION_HANDOFF.md`
+
+**Next: Phase 6 — Facade cleanup.** Final phase. Per Artifact 4:
+1. Confirm `EpisodeLogger` delegates cleanly to all six stores plus the
+   facade-level methods (`get_episodes_by_terrain_event`, `summary`,
+   `result_distribution`, `terrain_event_frequency`) — read each fresh,
+   don't assume the earlier classification still matches without checking.
+2. Check for now-unused imports in `logger.py` (`json`, `uuid` may no
+   longer be directly needed now that all store bodies own their own
+   json/uuid usage — verify with a real check, don't assume either way).
+3. Revisit D023 (store-construction registry) now that all six stores
+   exist in `__init__` — judge from the actual six-line block, not
+   speculation, per D023's own stated trigger condition.
+4. Final full-suite + integration test run, final facade-stability test
+   confirmation, final PROGRESS.md/ARCHITECTURE.md update marking
+   Candidate D fully complete.
 
 ---
 

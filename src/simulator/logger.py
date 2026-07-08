@@ -23,6 +23,7 @@ from simulator.stores.relationship_store import RelationshipStore
 from simulator.stores.player_profile_store import PlayerProfileStore
 from simulator.stores.doctrine_store import DoctrineStore
 from simulator.stores.observation_store import ObservationStore
+from simulator.stores.episode_store import EpisodeStore
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ class EpisodeLogger:
         self._player_profile_store = PlayerProfileStore(self._conn)
         self._doctrine_store = DoctrineStore(self._conn)
         self._observation_store = ObservationStore(self._conn)
+        self._episode_store = EpisodeStore(self._conn)
 
     # ------------------------------------------------------------------
     # Connection management
@@ -206,35 +208,24 @@ class EpisodeLogger:
         Persist a completed battle to the episodes table.
         Also extracts and logs terrain observations for doctrine formation.
         Returns the episode id.
+
+        This method is pure orchestration (Candidate D, D014, Phase 5) —
+        it composes EpisodeStore and ObservationStore, both of which are
+        independent of each other, and owns the single transaction boundary
+        for both writes. Neither store commits internally; this method
+        commits exactly once, after both inserts, preserving the original
+        atomic behavior. See DEFERRED_ITEMS D014 Artifact 2 (Transaction
+        Policy) for why: observations.episode_id has a FOREIGN KEY
+        REFERENCES episodes(id), enforced via PRAGMA foreign_keys=ON, so
+        the episode row must exist before the observation rows are
+        inserted, and both must commit together or not at all.
         """
         episode = state.to_episode()
         timestamp = datetime.now(timezone.utc).isoformat()
 
         conn = self._get_conn()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO episodes
-                (id, timestamp, player_id, age, result, turns_played, data)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                episode["id"],
-                timestamp,
-                episode["player_id"],
-                episode["age"],
-                episode["result"],
-                episode["turns_played"],
-                json.dumps(episode),
-            ),
-        )
-
-        # Extract terrain observations from this episode
-        # (facade composes EpisodeStore-equivalent insert + ObservationStore
-        # insert into one atomic transaction — see Transaction Policy,
-        # DEFERRED_ITEMS D014 Artifact 2. ObservationStore itself has no
-        # reference to episodes — this composition lives here, on the facade.)
+        self._episode_store.insert_episode_row(episode, timestamp)
         self._observation_store.insert_observations(episode, timestamp)
-
         conn.commit()
         return episode["id"]
 
@@ -244,15 +235,7 @@ class EpisodeLogger:
 
     def get_episode_count(self, player_id: Optional[str] = None) -> int:
         """Total number of logged episodes, optionally filtered by player."""
-        conn = self._get_conn()
-        if player_id:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM episodes WHERE player_id = ?",
-                (player_id,)
-            ).fetchone()
-        else:
-            row = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()
-        return row[0]
+        return self._episode_store.get_episode_count(player_id)
 
     def get_episodes(
         self,
@@ -265,27 +248,7 @@ class EpisodeLogger:
         Retrieve episodes, optionally filtered.
         Returns list of episode dicts (the brain-facing payload).
         """
-        conn = self._get_conn()
-        conditions = []
-        params: List[Any] = []
-
-        if player_id:
-            conditions.append("player_id = ?")
-            params.append(player_id)
-        if result:
-            conditions.append("result = ?")
-            params.append(result)
-
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        params += [limit, offset]
-
-        rows = conn.execute(
-            f"SELECT data FROM episodes {where} "
-            f"ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-            params,
-        ).fetchall()
-
-        return [json.loads(row["data"]) for row in rows]
+        return self._episode_store.get_episodes(player_id, result, limit, offset)
 
     def get_episodes_by_terrain_event(
         self,
@@ -313,12 +276,7 @@ class EpisodeLogger:
 
     def get_episode_by_id(self, episode_id: str) -> Optional[dict]:
         """Retrieve a single episode by ID."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT data FROM episodes WHERE id = ?",
-            (episode_id,),
-        ).fetchone()
-        return json.loads(row["data"]) if row else None
+        return self._episode_store.get_episode_by_id(episode_id)
 
     # ------------------------------------------------------------------
     # Observation retrieval
@@ -609,20 +567,13 @@ class EpisodeLogger:
         Each returned dict is the full episode data payload plus:
           _timestamp  — ISO timestamp from the episodes table row
           _result     — result string (also in payload, duplicated for convenience)
+
+        Delegates to EpisodeStore (Candidate D, D014, Phase 5) — this method
+        queries only the episodes table despite being physically located
+        near the player-profile methods and being used by PlayerProfiler.
+        Who reads a table is not who owns it (found during Phase 2's audit).
         """
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT timestamp, result, data FROM episodes "
-            "WHERE player_id = ? ORDER BY timestamp ASC",
-            (player_id,),
-        ).fetchall()
-        result = []
-        for row in rows:
-            d = json.loads(row["data"])
-            d["_timestamp"] = row["timestamp"]
-            d["_result"]    = row["result"]
-            result.append(d)
-        return result
+        return self._episode_store.get_player_episodes(player_id)
 
     def upsert_player_profile(
         self,

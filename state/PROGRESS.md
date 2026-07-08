@@ -2,7 +2,7 @@
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
 ## Last Updated: 2026-06-28
-## Test Count: 389/389
+## Test Count: 402/402
 
 ---
 
@@ -160,7 +160,7 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 4/6 complete]
+### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 5/6 complete]
 
 Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
 transaction policy, facade contract, extraction order + completion criteria).
@@ -341,13 +341,86 @@ composing two independent stores rather than one store depending on another.
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-**Phase 5 (EpisodeStore + facade workflow) — NOT STARTED.** Next up per
-extraction order. This is where `log_episode()`'s remaining inline SQL
-(the `episodes` table INSERT itself) moves into `EpisodeStore`, and the
-facade's `log_episode()` becomes purely orchestration: call
-`EpisodeStore.insert_episode_row()`, call
-`ObservationStore.insert_observations()` (already done, this phase),
-commit once.
+**Phase 5 (EpisodeStore + facade workflow) — COMPLETE ✅ (2026-06-28)**
+
+The phase the entire Repository Independence revision was designed for.
+Both supervisor reviews flagged this as the highest remaining risk in
+Candidate D — it owns the transaction boundary for the whole logging
+pipeline, not an isolated CRUD path.
+
+**The exact anti-pattern both reviews warned against, avoided:**
+```
+EpisodeStore.insert_episode_row() → commit()
+ObservationStore.insert_observations() → commit()
+```
+would silently destroy atomicity (two transactions instead of one) and
+violate the FK constraint found in Phase 4. Implemented instead:
+```
+EpisodeStore.insert_episode_row()        (no commit)
+ObservationStore.insert_observations()   (no commit)
+EpisodeLogger.commit()                    (once, on the facade)
+```
+`log_episode()` is now pure orchestration — it no longer contains any
+inline SQL, only composes two independent stores and owns the single
+transaction boundary.
+
+- `src/simulator/stores/episode_store.py` (new, 170 lines): `EpisodeStore`
+  — owns `episodes` exclusively. `insert_episode_row()` (renamed from
+  inline SQL in `log_episode()`, does NOT commit), `get_episode_count()`,
+  `get_episodes()` (ORDER BY timestamp DESC), `get_episode_by_id()`,
+  `get_player_episodes()` (ORDER BY timestamp ASC — deliberately the
+  opposite ordering, verified not assumed). Zero reference to
+  `ObservationStore` — Repository Independence fully realized.
+- `get_player_episodes()` (the Phase 2 finding) now correctly lives here,
+  not in `PlayerProfileStore` — verified working through its actual caller
+  (`PlayerProfiler`), not just in isolation: 24 real episodes, correctly
+  enriched with `_timestamp`, correctly ordered ASC.
+- `src/simulator/logger.py`: `log_episode()` rewritten as pure
+  orchestration (no inline SQL remains). Five methods reduced to
+  delegations. `get_episodes_by_terrain_event()` correctly left untouched
+  on the facade (genuine cross-store JOIN, per Artifact 1).
+- `tests/test_episode_store.py` (new, 13 tests): Repository Independence
+  (including an AST-based static check that `EpisodeStore`'s module never
+  imports `ObservationStore` — caught and fixed a false positive in this
+  test itself, where a naive string-search flagged the module's own
+  docstring prose as if it were a real dependency), a direct two-connection
+  proof that `insert_episode_row()` doesn't commit internally, and an
+  explicit atomic-composition test simulating the exact facade workflow.
+- Test count: 389 → 402 (all passing)
+- Integration test: 9/9 PASS. Verified with the most rigorous check yet:
+  precise before/after delta on the live production DB —
+  `episodes: 12023→12024 (+1), observations: 151358→151368 (+10)` —
+  identical pattern to Phase 4, confirming the restructured orchestration
+  produces byte-identical atomic behavior to before the restructure.
+
+**Process note:** Desktop Commander MCP went unresponsive mid-edit during
+this phase (the `__init__` construction edit). Did not assume it landed;
+verified the actual file state directly once the server recovered, found
+the edit had NOT applied, and redid it correctly before proceeding.
+
+**Definition of Done, verified for Phase 5:**
+- [✓] Store extracted
+- [✓] LoggerFacade delegates correctly (full orchestration restructure,
+  not simple CRUD delegation)
+- [✓] Repository Independence confirmed (standalone construction + 13
+  tests + AST-verified zero import of ObservationStore)
+- [✓] Old inline implementation removed (log_episode() has no inline SQL
+  left at all)
+- [✓] Full test suite passes (402/402)
+- [✓] Logger public API unchanged (facade-stability test)
+- [✓] Behavioral equivalence verified against live production DB via
+  precise before/after delta, matching Phase 4's elevated bar
+- [✓] Real caller (PlayerProfiler) verified working through the delegated
+  get_player_episodes(), not just isolated unit tests
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Phase 6 (Facade cleanup) — NOT STARTED.** Final phase per extraction
+order. Per Artifact 4: confirm `EpisodeLogger` delegates cleanly to all six
+stores plus the facade-level methods, review the now-fully-delegated file
+for any remaining dead code or unused imports (json/uuid may no longer be
+directly needed in logger.py itself — verify, don't assume), and revisit
+D023 (store-construction registry) now that all six stores exist.
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence
