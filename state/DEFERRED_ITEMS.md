@@ -342,7 +342,15 @@ are verified against actual current code (not assumed) before being written.
 
 ---
 
-### Artifact 1 — Repository Interface Specification
+### Artifact 1 — Repository Ownership Model
+**Renamed from "Repository Interface Specification" (post-Phase-5 review).**
+This document defines LOGICAL DATA OWNERSHIP — which subsystem owns which
+table, given the codebase as it exists. It is NOT an implementation
+checklist and does NOT by itself commit any store to a Candidate D
+extraction phase. Implementation scope (which of these get actually
+extracted, and when) is Artifact 4's job, not this one. Conflating the two
+caused a real gap: WorldModelStore appeared here but was never scheduled in
+Artifact 4's phase list — see Artifact 4 for the resolution.
 
 Exact current method signatures, grouped by store, per the dependency graph
 already built above.
@@ -521,9 +529,26 @@ Phase 5: EpisodeStore + facade workflow — REVISED (Repository Independence):
                                 commits once (see Transaction Policy, revised).
                                 Highest blast radius: this is the central
                                 write path every battle goes through.
-Phase 6: Facade cleanup — confirm EpisodeLogger delegates cleanly to all six
-                           stores plus the facade-level methods (Artifact 1)
+Phase 6: Facade cleanup — confirm EpisodeLogger delegates cleanly to all
+                           FIVE extracted stores (Relationship, PlayerProfile,
+                           Doctrine, Observation, Episode) plus the
+                           facade-level methods (Artifact 1)
 ```
+
+**Candidate D extraction scope, explicit (post-Phase-5 review — corrects a
+real gap between Artifact 1 and this Artifact 4):** Candidate D intentionally
+extracts only the five repositories above. `WorldModelStore` remains
+documented in Artifact 1's ownership model — that documentation is correct
+and unchanged — but was never scheduled here, and this is now a deliberate
+decision, not an oversight. Terrain knowledge (`terrain_knowledge` table,
+~78 lines: `upsert_terrain_knowledge`, `get_terrain_knowledge`,
+`get_all_terrain_knowledge`) has no cross-store dependency, no transaction
+complexity, and a small API surface — extracting it now would document a
+pattern rather than solve a demonstrated problem. **WorldModelStore
+extraction is deferred to D024** (see Completed/Open items below) —
+re-evaluate only on evidence (logger complexity growth, WorldModel
+responsibility growth, coupling, maintenance pain), not because it appears
+in Artifact 1's ownership model.
 
 **Terminology, precise:** this order is ranked by OPERATIONAL BLAST RADIUS
 (how much of the system is affected if this extraction introduces a subtle
@@ -642,23 +667,63 @@ self._relationship_store = RelationshipStore(self._conn)
 self._player_profile_store = PlayerProfileStore(self._conn)
 self._doctrine_store = DoctrineStore(self._conn)
 ```
-Perfectly acceptable at 3 stores. By Phase 6 there will be 6
-(Relationship, PlayerProfile, Doctrine, Observation, Episode, WorldModel),
-at which point `__init__` becomes a manual dependency list of six near-
-identical lines.
+Perfectly acceptable at 3 stores. By Phase 6 there will be 5
+(Relationship, PlayerProfile, Doctrine, Observation, Episode — WorldModel
+is deferred, see D024), at which point `__init__` becomes a manual
+dependency list of five near-identical lines.
 **Why deferred:** No evidence yet that this is a real problem — it's a
-one-time constructor cost, not a runtime cost, and six explicit lines is
+one-time constructor cost, not a runtime cost, and five explicit lines is
 still readable. "Evidence before implementation" cuts against introducing
 a registry/dependency-container pattern now on the strength of a review
 comment alone, with no measured maintenance pain yet.
 **When to address:** Only after Phase 6 (facade cleanup) is complete —
-revisit then and judge from the actual six-store `__init__`, not from
+revisit then and judge from the actual five-store `__init__`, not from
 speculation about what it might look like.
 **What to consider then (not before):** a small internal registry
 (`self._stores = {name: StoreClass(self._conn) for ...}`) OR simply leaving
-it as six explicit lines if it's still readable at that point. Do not
+it as five explicit lines if it's still readable at that point. Do not
 introduce a generic plugin/registry system speculatively — match whatever
 the actual Phase 6 `__init__` looks like.
+
+---
+
+### D024 — WorldModelStore extraction (terrain_knowledge)
+**Deferred from:** Post-Phase-5 supervisor review — resolved a real gap
+between Artifact 1 (Repository Ownership Model, which lists WorldModelStore
+as one of six logically-owned stores) and Artifact 4 (Candidate D's actual
+extraction scope, which only ever scheduled five phases). The two documents
+answer different questions — logical ownership vs. implementation scope —
+and were incorrectly treated as the same commitment. Neither document was
+wrong; conflating them was the error.
+**Current state:** `terrain_knowledge` (the table) and its three methods
+(`upsert_terrain_knowledge`, `get_terrain_knowledge`,
+`get_all_terrain_knowledge`, ~78 lines, verified) remain inline in
+`logger.py`. No intra-logger dependency (verified — same "Depends on: none"
+status as Doctrine/PlayerProfile/Relationship had before their own
+extractions). Read by `WorldModel` (brain layer) but that's a cross-layer
+caller relationship, not an intra-logger one.
+**Why deferred:** Evaluated directly, not deferred by default:
+  - No cross-store dependency or transaction complexity (unlike Episode/
+    Observation's FK relationship)
+  - Small API surface, ~78 lines — extracting it would not meaningfully
+    reduce `logger.py`'s size or complexity at this point
+  - No demonstrated maintenance pain, ownership confusion, or testing
+    difficulty — the actual bar "evidence before redesign" sets
+  - Extracting it now would be implementing documentation (because Artifact
+    1 lists it) rather than solving a demonstrated engineering problem
+**When to address:** Re-evaluate only on evidence — NOT because it appears
+in Artifact 1's ownership model. Concrete triggers:
+  - WorldModel's responsibilities grow materially (e.g. confidence decay,
+    seasonal adaptation, belief provenance — mentioned as future
+    possibilities but not yet built)
+  - `logger.py`'s remaining facade/utility code grows enough that terrain
+    knowledge's presence becomes actual clutter, not just residual code
+  - A second store ever needs to depend on `terrain_knowledge` directly
+    (currently zero stores do)
+**What to do when triggered:** Same protocol as Phases 1-5 — read every
+method fresh from the live file, standalone Repository Independence tests
+first, facade wiring, full suite, integration verification, before/after
+delta check if any write behavior is touched.
 
 ---
 
