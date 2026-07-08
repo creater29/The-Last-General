@@ -544,8 +544,9 @@ decision, not an oversight. Terrain knowledge (`terrain_knowledge` table,
 ~78 lines: `upsert_terrain_knowledge`, `get_terrain_knowledge`,
 `get_all_terrain_knowledge`) has no cross-store dependency, no transaction
 complexity, and a small API surface — extracting it now would document a
-pattern rather than solve a demonstrated problem. **WorldModelStore
-extraction is deferred to D024** (see Completed/Open items below) —
+pattern rather than solve a demonstrated problem. **WorldModelStore is not
+included in Candidate D's implementation scope — see D024** for the
+evaluation and re-evaluation triggers (see Completed/Open items below) —
 re-evaluate only on evidence (logger complexity growth, WorldModel
 responsibility growth, coupling, maintenance pain), not because it appears
 in Artifact 1's ownership model.
@@ -669,7 +670,8 @@ self._doctrine_store = DoctrineStore(self._conn)
 ```
 Perfectly acceptable at 3 stores. By Phase 6 there will be 5
 (Relationship, PlayerProfile, Doctrine, Observation, Episode — WorldModel
-is deferred, see D024), at which point `__init__` becomes a manual
+is not included in Candidate D's scope, see D024), at which point
+`__init__` becomes a manual
 dependency list of five near-identical lines.
 **Why deferred:** No evidence yet that this is a real problem — it's a
 one-time constructor cost, not a runtime cost, and five explicit lines is
@@ -687,7 +689,12 @@ the actual Phase 6 `__init__` looks like.
 
 ---
 
-### D024 — WorldModelStore extraction (terrain_knowledge)
+### D024 — WorldModelStore not included in Candidate D implementation scope
+**Note on phrasing:** deliberately not called "deferred" — that word implies
+it will eventually happen. It may never happen, and that would be fine.
+This entry exists so the decision not to extract it is a conscious,
+evidence-evaluated one rather than a silent gap, not to predict a future
+extraction.
 **Deferred from:** Post-Phase-5 supervisor review — resolved a real gap
 between Artifact 1 (Repository Ownership Model, which lists WorldModelStore
 as one of six logically-owned stores) and Artifact 4 (Candidate D's actual
@@ -702,7 +709,7 @@ wrong; conflating them was the error.
 status as Doctrine/PlayerProfile/Relationship had before their own
 extractions). Read by `WorldModel` (brain layer) but that's a cross-layer
 caller relationship, not an intra-logger one.
-**Why deferred:** Evaluated directly, not deferred by default:
+**Why not extracted now:** Evaluated directly, not skipped by default:
   - No cross-store dependency or transaction complexity (unlike Episode/
     Observation's FK relationship)
   - Small API surface, ~78 lines — extracting it would not meaningfully
@@ -711,8 +718,9 @@ caller relationship, not an intra-logger one.
     difficulty — the actual bar "evidence before redesign" sets
   - Extracting it now would be implementing documentation (because Artifact
     1 lists it) rather than solving a demonstrated engineering problem
-**When to address:** Re-evaluate only on evidence — NOT because it appears
-in Artifact 1's ownership model. Concrete triggers:
+**Re-evaluation trigger (not a timeline — may never fire):** Re-evaluate
+only on evidence — NOT because it appears in Artifact 1's ownership model.
+Concrete triggers:
   - WorldModel's responsibilities grow materially (e.g. confidence decay,
     seasonal adaptation, belief provenance — mentioned as future
     possibilities but not yet built)

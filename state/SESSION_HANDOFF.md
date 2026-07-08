@@ -7,6 +7,29 @@
 
 ---
 
+## ⚠️ PUSH PENDING — infrastructure note, not a project/architecture concern
+
+Local `main` is 2 commits ahead of `origin/main`:
+- `7ff3006` — Candidate D Phase 5 (EpisodeStore)
+- `e6dd9ab` — D014 documentation correction (Artifact 1/4 separation)
+
+`git push` has failed twice with a credential/authentication error
+("could not read Password... Device not configured"). This is an
+infrastructure issue, not a code or architecture problem — the commits
+exist safely on local `main`, working tree is clean, repository history is
+intact, nothing is at risk. Per supervisor review: this belongs here, in
+SESSION_HANDOFF, not in PROGRESS.md — the architecture doesn't need to know
+about a local push failure, but the next session does.
+
+**Before starting new work:** verify with `git status` whether this has
+been resolved (check "ahead of origin/main" count). If still pending,
+resolving it is Arman's task (likely needs re-authentication in an
+interactive terminal — the non-interactive shell session can't prompt for
+a password). Once resolved, `git push` to sync both pending commits before
+continuing to Phase 6.
+
+---
+
 ## Candidate D Phase 5 — EpisodeStore + facade workflow restructure (COMPLETE)
 
 The phase the entire Repository Independence revision (decided before
