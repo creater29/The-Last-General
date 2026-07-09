@@ -190,6 +190,87 @@ boundary violation — it belongs on the facade, not forced into either store.
 
 ---
 
+## EpisodeLogger Responsibility Classification (Permanent)
+
+Produced at the end of Candidate D (Phase 6) — every method remaining in
+`EpisodeLogger` was consciously classified, not left unexamined. This
+table is the permanent record of *why* each responsibility lives where it
+does. Update it when responsibilities move; do not let it go stale.
+
+**Lifecycle / DBManager** (facade-owned; tracked in DEFERRED_ITEMS D026,
+evidence-gated, not acted on):
+`__init__`, `_connect`, `_get_conn`, `close`, `__enter__`, `__exit__`,
+`init_db`
+
+**Thin delegation** (facade-owned; correct and expected — the facade's job
+is exposing a stable public API while internally delegating to the
+extracted store):
+all CRUD-style methods for the five extracted stores (Relationship,
+PlayerProfile, Doctrine, Observation, Episode) — 21 methods total.
+
+**Cross-store composition** (facade-owned; correct — genuinely spans more
+than one store's table, verified by direct read, not assumed):
+`get_episodes_by_terrain_event` (real SQL JOIN, episodes+observations),
+`summary` (reads across all seven tables)
+
+**Analytics queries** (facade-owned; deliberately distinct from both thin
+delegation and cross-store composition — see reasoning below):
+`result_distribution`, `terrain_event_frequency`
+
+**Intentionally inline** (facade-owned; tracked in DEFERRED_ITEMS D024,
+evidence-gated, not acted on):
+`upsert_terrain_knowledge`, `get_terrain_knowledge`, `get_all_terrain_knowledge`
+
+---
+
+### Why "analytics queries" is its own category, not folded into repositories
+
+`result_distribution()` and `terrain_event_frequency()` each touch exactly
+one table — by table-count alone they look like they belong in
+`EpisodeStore`/`ObservationStore`. They do not, and the reasoning matters
+more than the conclusion:
+
+**Repository ownership means owning persistence and canonical retrieval of
+domain objects — not every SQL statement that happens to reference that
+table.** `get_episode_by_id()` returns an episode. `result_distribution()`
+returns a derived aggregate (`{"win": 412, "loss": 89, ...}`) — it isn't
+retrieving anything, it's computing a report.
+
+**The test that actually distinguishes them, verified against real
+callers, not assumed:** does the brain pipeline depend on this method as an
+operational input, or is it an external diagnostic with no pipeline
+dependency?
+
+- `ObservationStore.get_observation_patterns()` is *also* a single-table
+  `GROUP BY`/`HAVING`/`COUNT` aggregate — structurally identical in kind to
+  `result_distribution()`. It correctly lives in `ObservationStore` anyway,
+  because `world_model.py` calls it as a genuine operational input —
+  `WorldModel.update_from_observations()` depends on it to form beliefs
+  that `DoctrineExtractor` promotes into doctrines. It is load-bearing
+  brain-pipeline logic.
+- `terrain_event_frequency()` is called only by `scripts/generate_corpus.py`
+  — a standalone corpus-generation utility, not the live decision pipeline.
+- `result_distribution()` has zero callers anywhere in `src/` or `scripts/`.
+
+Same SQL shape (single-table aggregate), opposite answer, because the real
+question isn't "how many tables does this touch" — it's "is anything in
+the actual system relying on this as an input." `get_observation_patterns()`
+passes that test and belongs in a repository. `result_distribution()` and
+`terrain_event_frequency()` fail it and are correctly facade-level
+diagnostics — not because Candidate D ran out of time to move them, but
+because moving them would extend "repository" to mean "persistence +
+reporting," which is a real architectural expansion Candidate D's actual
+goal (remove persistence responsibility from `EpisodeLogger`) never called
+for.
+
+**Re-evaluation trigger (not a timeline — may never fire), tracked as
+DEFERRED_ITEMS D027:** revisit only if a dedicated reporting/analytics
+subsystem is ever justified, or if the number of facade-level analytics
+methods grows enough that their presence becomes genuine clutter rather
+than two small diagnostic queries.
+
+---
+
 ## Core Data Structures
 
 ### Cell

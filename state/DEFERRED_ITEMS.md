@@ -808,6 +808,42 @@ be low-risk relative to the six store extractions already completed.
 
 ---
 
+### D027 — result_distribution()/terrain_event_frequency() are facade-level "analytics queries," not repository methods
+**Raised by:** Phase 6 conscious-classification audit — a genuine judgment
+question surfaced, then a supervisor decision was requested and given.
+**Current state:** Both methods touch exactly one table each
+(`result_distribution()` → `episodes`, `terrain_event_frequency()` →
+`observations`) and were briefly reconsidered for extraction into
+`EpisodeStore`/`ObservationStore` for that reason. Decision: do not move.
+**Why not moved:** Repository ownership means owning persistence and
+canonical retrieval of domain objects, not every SQL statement that
+happens to reference that table. These return derived aggregates
+(`{"win": 412, ...}`), not domain records. The distinguishing test,
+verified against real callers rather than assumed: does the brain pipeline
+depend on this as an operational input? `ObservationStore.get_observation_patterns()`
+is structurally the same kind of query (single-table `GROUP BY`/`HAVING`)
+but correctly stays in a repository because `world_model.py` depends on it
+as a genuine pipeline input. `terrain_event_frequency()` is called only by
+`scripts/generate_corpus.py` (a utility script, not the live pipeline).
+`result_distribution()` has zero callers anywhere. Moving them would
+redefine "repository" to mean "persistence + reporting" — a real
+architectural expansion Candidate D's actual goal (remove persistence
+responsibility from `EpisodeLogger`) never called for. Full reasoning
+recorded permanently in ARCHITECTURE.md's "EpisodeLogger Responsibility
+Classification" section — this entry tracks the re-evaluation trigger only.
+**Re-evaluation trigger (not a timeline — may never fire):**
+  - A dedicated reporting/analytics subsystem is ever justified by other
+    needs (not created just to house these two methods)
+  - Facade-level analytics methods grow enough in number that their
+    presence becomes genuine clutter, not two small diagnostic queries
+**What to do when triggered:** If a reporting subsystem is ever built,
+these two are natural first migrants into it. If instead a repository
+gains a genuine pipeline-dependent analytics need (like
+`get_observation_patterns()`), that's a separate, evidence-driven decision
+per-method, not a reason to move these two.
+
+---
+
 ## Open — Address During Stage 3+ / 4
 
 ---
