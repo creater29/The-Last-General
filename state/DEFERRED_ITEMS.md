@@ -772,6 +772,42 @@ narrative, "why we chose X over Y" reasoning already captured elsewhere.
 
 ---
 
+### D026 — logger.py still owns schema bootstrap (init_db) and connection lifecycle
+**Raised by:** Phase 5 supervisor review ("Issue A"), never formally tracked
+until now (Phase 6 conscious-classification audit) — only existed as review
+prose, which is exactly the gap this entry closes.
+**Current state:** `EpisodeLogger` still owns `init_db()` (every `CREATE
+TABLE IF NOT EXISTS` for all tables), `_connect()`, `_get_conn()`, `close()`,
+`__enter__`/`__exit__`. This is architecturally two responsibilities bundled
+into one class: facade (workflow orchestration, which Candidate D correctly
+extracted the store-specific parts of) and database bootstrap/connection
+lifecycle (which Candidate D never touched).
+**Why not acted on now:** Same standard applied to D023/D024/D025 — no
+measurable pain yet. `init_db()` is called once per `EpisodeLogger`
+lifetime; it is not a runtime hot path, not duplicated logic, and every
+store already receives its connection via constructor injection (the actual
+architectural win Candidate D delivered). Splitting this into a `DBManager`
+class now would be implementing a principle already stated in Artifact 1
+("init_db(), close(), _connect(), _get_conn() stay at facade/DBManager
+level") rather than solving a demonstrated problem — the same failure mode
+D024 avoided (WorldModelStore) and D025 avoided (docstring trimming).
+**Re-evaluation trigger (not a timeline — may never fire):**
+  - `init_db()`'s schema definitions need to be reused somewhere `EpisodeLogger`
+    itself isn't involved (e.g. a migration/seeding script that shouldn't
+    construct a full facade)
+  - Testing `EpisodeLogger` becomes difficult specifically because schema
+    setup and workflow logic are bundled
+  - A second facade-like class is ever needed and would otherwise duplicate
+    `init_db()`/`_connect()`
+**What to do when triggered:** Extract `_connect()`, `_get_conn()`, `close()`,
+`__enter__`/`__exit__`, and `init_db()`'s table-creation SQL into a
+`DBManager` class that `EpisodeLogger` composes, exactly the role Artifact 1
+already named for it. Each store's construction (`Store(conn)`) is already
+decoupled from where the connection comes from, so this extraction should
+be low-risk relative to the six store extractions already completed.
+
+---
+
 ## Open — Address During Stage 3+ / 4
 
 ---

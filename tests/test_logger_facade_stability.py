@@ -26,6 +26,14 @@ from simulator.logger import EpisodeLogger
 
 
 # Captured 2026-06-28, before Phase 1 (RelationshipStore) extraction began.
+#
+# Baseline update 2026-06-28 (Phase 6): get_known_players() removed.
+# Reason: W010 (KNOWN_ISSUES) — zero callers anywhere in the codebase,
+# confirmed broken (queried a column that doesn't exist in the current
+# schema), and its own resolution rule explicitly named "Candidate D" as
+# the point to re-check for a consumer and delete if still none exists.
+# Re-checked at Phase 6: still zero callers. Deleted per that pre-committed
+# rule, not a new decision made during this phase.
 BASELINE_SIGNATURES = {
     "close": "(self) -> 'None'",
     "get_all_doctrines": "(self) -> 'List[Dict[str, Any]]'",
@@ -36,7 +44,6 @@ BASELINE_SIGNATURES = {
     "get_episode_count": "(self, player_id: 'Optional[str]' = None) -> 'int'",
     "get_episodes": "(self, player_id: 'Optional[str]' = None, result: 'Optional[str]' = None, limit: 'int' = 100, offset: 'int' = 0) -> 'List[dict]'",
     "get_episodes_by_terrain_event": "(self, event_type: 'str', limit: 'int' = 50) -> 'List[dict]'",
-    "get_known_players": "(self) -> 'List[str]'",
     "get_observation_count": "(self) -> 'int'",
     "get_observation_patterns": "(self, min_count: 'int' = 5) -> 'List[dict]'",
     "get_observations_by_terrain": "(self, terrain_context: 'str', limit: 'int' = 100) -> 'List[dict]'",

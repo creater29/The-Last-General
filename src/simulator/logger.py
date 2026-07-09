@@ -13,7 +13,6 @@ The brain will query them directly in Stage 2.
 from __future__ import annotations
 import sqlite3
 import json
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -304,28 +303,6 @@ class EpisodeLogger:
         This is the key query the doctrine extractor will use.
         """
         return self._observation_store.get_observation_patterns(min_count)
-
-    # ------------------------------------------------------------------
-    # Player profile management
-    # ------------------------------------------------------------------
-
-    def get_known_players(self) -> List[str]:
-        """
-        List all player IDs the General has encountered.
-
-        ORPHANED API — zero callers anywhere in the codebase as of 2026-06-28
-        audit. Also currently broken: queries `encounter_count`, a column
-        that does not exist in the current player_profiles schema (would
-        raise sqlite3.OperationalError if ever called). Not repaired because
-        no consumer has been identified yet — see KNOWN_ISSUES for tracking.
-        Do not call this method until it is either fixed with a demonstrated
-        use case, or removed.
-        """
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT player_id FROM player_profiles ORDER BY encounter_count DESC"
-        ).fetchall()
-        return [row["player_id"] for row in rows]
 
     # ------------------------------------------------------------------
     # Relationship record management
