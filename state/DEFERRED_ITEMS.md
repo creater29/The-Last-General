@@ -208,6 +208,16 @@ or extract to a separate `StatsAggregator` that composes all stores. Do not
 force these into any single store.
 
 **What to do:**
+**⚠️ SUPERSEDED — this was the original pre-execution plan (six modules
+including `world_model_store.py`, a `db_manager.py`, a "345 tests" target).
+Candidate D actually extracted five stores, not six (`world_model_store.py`
+was never built — see D024), `db_manager.py` was never built (see D026),
+and the actual final test count was 402, not 345. This block is kept as
+historical record of the original plan; see PROGRESS.md's Candidate D
+section for what actually happened, phase by phase, and ARCHITECTURE.md's
+"EpisodeLogger Responsibility Classification" for the final, accurate
+account of where every responsibility ended up.**
+
 - Split into six modules matching the dependency graph above:
   src/simulator/stores/episode_store.py      — log_episode, get_episodes,
     get_episode_count, get_episodes_by_terrain_event, get_episode_by_id
@@ -222,7 +232,7 @@ force these into any single store.
   src/simulator/stores/relationship_store.py — upsert_relationship,
     get_relationship, migrate_relationship_schema
   src/simulator/db_manager.py                — _connect, init_db, close
-- Keep EpisodeLogger as a facade that composes all six stores.
+- Keep EpisodeLogger as a facade that composes all five stores.
   All existing call sites (brain files, tests) use logger.X — no call site
   changes required.
 - Resolve `get_known_players()` during this split (see above) — search for
@@ -458,7 +468,7 @@ covers both the episodes INSERT and every observations INSERT made inside
 existing, working pattern, not something to invent from scratch.
 
 Policy (preserves current behavior, applies it as an explicit rule):
-1. All six stores share ONE underlying `sqlite3.Connection`, owned by
+1. All five stores share ONE underlying `sqlite3.Connection`, owned by
    DBManager and injected into each store at construction
    (e.g. EpisodeStore(conn), DoctrineStore(conn), ...). No store opens its
    own connection.
@@ -472,7 +482,7 @@ Policy (preserves current behavior, applies it as an explicit rule):
    `EpisodeStore.insert_episode_row(...)` (no commit) then
    `ObservationStore.insert_observations(...)` (no commit), then issues the
    single `commit()` itself — same atomic outcome as today, but neither
-   store references the other. This keeps every one of the six stores
+   store references the other. This keeps every one of the five stores
    independently constructable and testable (`RelationshipStore(conn)` with
    no other store required to exist), which the original draft of this
    policy (EpisodeStore holding a direct reference to ObservationStore)
@@ -490,7 +500,7 @@ EpisodeLogger remains the sole external-facing class. Every existing caller
 (brain/*.py, tests/*.py, scripts/*.py) continues to call
 logger.upsert_doctrine(...), logger.get_relationship(...), etc. — zero
 call-site changes. Internally, EpisodeLogger.__init__ constructs one shared
-connection via DBManager, then constructs all six stores with that
+connection via DBManager, then constructs all five stores with that
 connection, and each public method becomes a thin delegate to the
 corresponding store method (or, for facade-level methods identified in
 Artifact 1, executes the cross-store logic directly).
@@ -566,11 +576,12 @@ from silently contradicting each other.
 **Repository Independence (required, per supervisor review):** every
 extracted store must be constructable and testable standalone — e.g.
 `RelationshipStore(conn)` must work and be fully testable without
-`EpisodeStore`, `ObservationStore`, `DoctrineStore`, `PlayerProfileStore`, or
-`WorldModelStore` existing or being imported. This is now satisfied by all
-six stores after the Phase 5 revision (see Transaction Policy, revised) —
-verify this explicitly for each store at extraction time (e.g. a small
-standalone test that constructs only that one store against a temp DB).
+`EpisodeStore`, `ObservationStore`, `DoctrineStore`, or `PlayerProfileStore`
+existing or being imported (`WorldModelStore` was never built — see D024).
+This is now satisfied by all five stores after the Phase 5 revision (see
+Transaction Policy, revised) — verify this explicitly for each store at
+extraction time (e.g. a small standalone test that constructs only that one
+store against a temp DB).
 
 **Hard rule: run the full test suite after EACH phase, not just at the end.**
 A phase is not considered done until all existing tests (345 as of this

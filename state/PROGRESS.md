@@ -160,7 +160,7 @@ value. If trust reaches -1.0 (clamped) after many runs, this remains correct beh
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-### Candidate D — Logger Repository Split [IN PROGRESS 🔄 — Phase 5/6 complete]
+### Candidate D — Logger Repository Split [COMPLETE ✅ — 6/6 phases]
 
 Full specification in DEFERRED_ITEMS.md D014 (4 artifacts: interface spec,
 transaction policy, facade contract, extraction order + completion criteria).
@@ -415,12 +415,88 @@ the edit had NOT applied, and redid it correctly before proceeding.
 
 **Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
 
-**Phase 6 (Facade cleanup) — NOT STARTED.** Final phase per extraction
-order. Per Artifact 4: confirm `EpisodeLogger` delegates cleanly to all six
-stores plus the facade-level methods, review the now-fully-delegated file
-for any remaining dead code or unused imports (json/uuid may no longer be
-directly needed in logger.py itself — verify, don't assume), and revisit
-D023 (store-construction registry) now that all six stores exist.
+**Phase 6 (Facade cleanup) — COMPLETE ✅ (2026-06-28)**
+
+Final phase. Scoped exactly as agreed: delegation verification, dead
+import/code audit, conscious classification of every remaining
+`EpisodeLogger` method, documentation updates, final integration
+verification. No new stores, no registry, no redesign.
+
+**Resolved this phase (pre-committed decisions, not new scope):**
+- W010/`get_known_players()` — its own resolution rule named "Candidate D"
+  as the re-check point ("if still no consumer found, delete it"). Re-checked
+  — still zero callers anywhere. Deleted. Moved to KNOWN_ISSUES as R008.
+  Facade-stability baseline updated in the same commit with the reason.
+- Dead import audit: `import uuid` was genuinely dead (zero usage — UUID
+  generation moved into `ObservationStore` in Phase 4). Removed. `import json`
+  verified still needed (`get_episodes_by_terrain_event`'s genuine JOIN, plus
+  the three `terrain_knowledge` methods D024 keeps inline) — confirmed via
+  grep, not assumed either way.
+- D026 added: the `init_db()`/connection-lifecycle split (flagged in Phase 5
+  review prose as "Issue A") was never formally tracked. Closed that gap —
+  same evidence-gated pattern as D023-D025.
+
+**Conscious classification of all remaining `EpisodeLogger` methods —
+now permanent in ARCHITECTURE.md's "EpisodeLogger Responsibility
+Classification" section, not left in review history:**
+- Lifecycle/DBManager (7 methods) — facade-owned, D026
+- Thin delegation (21 methods) — facade-owned, correct and expected
+- Cross-store composition (2 methods) — `get_episodes_by_terrain_event`,
+  `summary` — genuine JOIN/multi-table reads, verified not assumed
+- Analytics queries (2 methods) — `result_distribution`,
+  `terrain_event_frequency` — see D027; a genuine judgment question was
+  raised (they're single-table, why not extract them?) and resolved by
+  checking actual callers rather than theorizing: `terrain_event_frequency`
+  is called only by a corpus-generation script, `result_distribution` has
+  zero callers anywhere, versus `ObservationStore.get_observation_patterns()`
+  (structurally the same kind of query) which correctly stays in a
+  repository because `world_model.py` depends on it as a genuine pipeline
+  input. Moving them would have redefined "repository" to mean "persistence
+  + reporting" — an expansion Candidate D's actual goal never called for.
+- Intentionally inline (3 methods) — `terrain_knowledge` trio, D024
+
+**Final verification:**
+- Test count: 402/402 (unchanged from Phase 5 — Phase 6 was cleanup/audit,
+  not feature work, so no new test count growth expected or seen)
+- Integration test: 9/9 PASS, verified live
+- `logger.py`: 981 lines (trigger point, pre-Candidate-D) → 599 lines now
+  — a 382-line (~39%) reduction, with the actual persistence logic moved
+  into five independently-tested store files, not just deleted
+
+**Candidate D — full summary (all 6 phases):**
+| Phase | Store | Tests added | Status |
+|-------|-------|-------------|--------|
+| 1 | RelationshipStore | 8 | ✅ |
+| 1 | (facade-stability test file, introduced alongside Phase 1) | 2 | ✅ |
+| 2 | PlayerProfileStore | 10 | ✅ |
+| 3 | DoctrineStore | 12 | ✅ |
+| 4 | ObservationStore | 12 | ✅ |
+| 5 | EpisodeStore | 13 | ✅ |
+| 6 | Facade cleanup | 0 (audit/removal only) | ✅ |
+
+Total: 8+2+10+12+12+13+0 = 57, matching 345→402 exactly (verified by
+direct arithmetic, not assumed — the 2-test facade-stability line is
+called out separately because the earlier draft of this table summed to
+55, a 2-test gap that would have looked like unexplained drift to a future
+reader without this reconciliation).
+
+**Definition of Done, verified for Phase 6:**
+- [✓] EpisodeLogger delegates cleanly to all five stores + facade-level methods
+- [✓] Dead imports removed (uuid), dead code removed (get_known_players)
+- [✓] Every remaining method consciously classified — permanent record in ARCHITECTURE.md
+- [✓] Full test suite passes (402/402)
+- [✓] Logger public API unchanged (facade-stability test, baseline updated
+  with explicit reason for the one intentional removal)
+- [✓] Final integration verification (9/9, live numbers confirmed)
+- [✓] Documentation internally consistent (D014, PROGRESS, ARCHITECTURE,
+  SESSION_HANDOFF cross-checked — see SESSION_HANDOFF for the consistency
+  check itself)
+
+**Acceptance:** impl ✓ | unit tests ✓ | integration ✓ | db verified ✓ | docs ✓
+
+**Candidate D is closed.** Per the retrospective recommendation: resist
+reopening it unless new evidence emerges (D023/D024/D025/D026/D027 each
+have explicit, evidence-based re-evaluation triggers — none are timelines).
 
 ### Candidate E — Scout Mechanics [NOT STARTED]
 - Hidden armies, scout report success/failure, intel confidence

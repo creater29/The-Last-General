@@ -7,6 +7,87 @@
 
 ---
 
+## Candidate D Phase 6 — Facade cleanup (COMPLETE) — CANDIDATE D CLOSED
+
+Final phase. Scoped as agreed: delegation verification, dead import/code
+audit, conscious classification of every remaining `EpisodeLogger` method,
+documentation updates, final integration verification. No new stores, no
+registry, no redesign — held to that boundary throughout.
+
+**Resolved (pre-committed decisions, not new scope):**
+- `get_known_players()` (W010) — re-checked for a consumer at its own
+  stated trigger point ("Candidate D"), still zero callers, deleted.
+  Facade-stability baseline updated with the reason in the same commit.
+  Moved to KNOWN_ISSUES as R008.
+- `import uuid` — genuinely dead (confirmed via grep, not assumed),
+  removed. `import json` verified still needed, left in place.
+- D026 added — the `init_db()`/connection-lifecycle split (Phase 5
+  review's "Issue A") was only ever in review prose, never tracked.
+
+**The one genuine judgment call this phase surfaced:** `result_distribution()`
+and `terrain_event_frequency()` are single-table queries — by table-count
+alone they looked like they belonged in `EpisodeStore`/`ObservationStore`.
+Presented as an open question rather than decided unilaterally. Supervisor
+decision: don't move them — repository ownership means owning persistence
+of domain objects, not every SQL statement touching that table; these
+return derived aggregates, not records. Before implementing that decision,
+stress-tested the reasoning against something already shipped:
+`ObservationStore.get_observation_patterns()` (Phase 4) is structurally the
+same kind of query, yet correctly stays in a repository. Checked real
+callers to find the actual distinguishing test rather than trusting the
+principle in the abstract: `get_observation_patterns()` is a genuine
+pipeline dependency (`world_model.py` uses it to form beliefs
+`DoctrineExtractor` promotes into doctrines); `terrain_event_frequency()`
+is called only by a corpus-generation utility script; `result_distribution()`
+has zero callers anywhere. Tracked as D027. Full reasoning now permanent in
+ARCHITECTURE.md's new "EpisodeLogger Responsibility Classification" section.
+
+**Internal-consistency check (per the post-Phase-5 retrospective request),
+actually performed, not just asserted:**
+- Verified the Phase-by-phase test-count table in PROGRESS.md sums
+  correctly against the real historical total. It didn't on the first
+  draft — 8+10+12+12+13 = 55, but the actual delta was 57. Found the gap:
+  the 2 facade-stability tests, introduced alongside Phase 1 but not
+  attributed to any store in the table. Fixed with an explicit
+  reconciliation line rather than leaving a 2-test discrepancy for a future
+  reader to puzzle over.
+- Grepped for stale "six stores" language across all four state files.
+  Found real hits in D014's Artifacts 2 and 3 (living, current-policy text
+  — genuinely stale, since D024 later excluded `WorldModelStore` from
+  Candidate D's actual scope) and fixed all five. Found the *original*
+  pre-execution "What to do" plan (six modules including a
+  `world_model_store.py` and `db_manager.py` that were never built, a
+  "345 tests" target) and marked it SUPERSEDED rather than silently
+  rewriting history to pretend the plan always matched what was actually
+  built — pointed future readers to PROGRESS.md and ARCHITECTURE.md for
+  what actually happened.
+- Deliberately left "six stores" references inside SESSION_HANDOFF.md's
+  earlier dated entries (e.g. the Phase 5 entry) untouched — those are
+  point-in-time records of what was believed before D024's correction,
+  not living spec text. Correcting them retroactively would misrepresent
+  what was actually known at that point in the project's history.
+
+**Final verification:**
+- Test count: 402/402 (unchanged from Phase 5 — audit/cleanup phase, no
+  new feature tests expected or added)
+- Integration test: 9/9 PASS, verified live
+- `logger.py`: 981 lines (Candidate D's trigger point) → 599 lines now
+  (~39% reduction, with the actual logic moved into five independently
+  tested files, not just deleted)
+
+**Candidate D is closed.** Per the retrospective: resist reopening it
+unless new evidence emerges. D023, D024, D025, D026, D027 each carry an
+explicit, evidence-based re-evaluation trigger — none are timelines, none
+imply eventual action is expected.
+
+**Full history:** `git log --oneline` from `7ff3006` (Phase 5) through this
+entry's commit covers Phase 5, the Artifact 1/4 separation, D024's wording
+refinement, D025, the git-authentication resolution, Phase 6's partial
+work, and the classification decision — 8 commits, one focused change per
+commit, matching the discipline used throughout every phase.
+
+---
+
 ## Candidate D Phase 5 — EpisodeStore + facade workflow restructure (COMPLETE)
 
 The phase the entire Repository Independence revision (decided before
