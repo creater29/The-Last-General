@@ -7,6 +7,146 @@
 
 ---
 
+## Candidate E — Audit + Design (COMPLETE) — implementation NOT started
+
+Same discipline as D014: full architecture review before any code, held to
+by explicit supervisor decision ("approved for audit only, not
+implementation") before this work began.
+
+### Audit (code-only, no design decisions made during this phase)
+
+Read `battle.py` fully (726 lines), `grid.py`'s terrain physics/Cell/zone
+system, `snapshot.py` fully (75 lines), and grepped for every plausible
+existing hook (scout/recon/visibility/detect/hidden/fog/etc.) before any
+design conversation happened. Findings, all verified directly against code,
+not inferred:
+
+**The central discovery:** the simulator doesn't lack a "hidden armies"
+feature so much as it has no concept of incomplete battlefield knowledge at
+all, at any level. `known_enemy_presence` (`to_brain_snapshot()`) is
+computed straight from `self.player_units` — the simulator's complete, true
+list — with zero spatial/distance/line-of-sight filtering anywhere in the
+codebase. Enemy count is always 100% accurate today. Only composition
+(unit-type breakdown) is hidden, and only during live decision-making.
+
+**Composition doesn't stay hidden past the battle.** `_unit_summary()`
+persists an exact `unit_types` breakdown into every logged episode.
+`PlayerProfiler` already reads this from *past* episodes to build
+`preferred_units` — confirmed via direct grep of `player_profiler.py`, not
+assumed. This is architecturally the same pattern as doctrine formation:
+learned from repeated historical observation, never real-time omniscience.
+Real, working precedent already exists for "the General learns what a
+specific opponent tends to bring, over many games" — scouting adds a third
+channel (live, in-battle, imperfect) alongside (1) never-live and
+(2) cross-battle-learned.
+
+**Execution is already fully decoupled from perception.** Every
+`_execute_general_intent()` branch (aggressive push, flank, supply raid,
+etc.) operates on complete simulator truth (`self.rng.choice(alive_player)`,
+precise supply-sorted targeting) regardless of what `CommanderKnowledge`
+exposes. Confirmed by reading every intent branch, not sampling one. This
+means a perception-layer change for Candidate E needs zero changes to combat
+resolution — the separation already exists, built for a different reason
+(the simulator/brain boundary), directly reusable here.
+
+**Reusable existing shapes, not hooks to build from scratch:**
+- `known_friendly_state` already has `has_siege`/`has_cavalry` boolean
+  flags for the General's own forces — proven pattern, reusable for enemy
+  composition, gated by confidence instead of always-true.
+- `Cell.military_features()` already computes `ambush_value` (cover > 0.5
+  and mobility_cost < 2.5) — a concealment-adjacent primitive already in
+  the terrain vocabulary.
+- `cover` is a live, working mechanic (`physics.py:380`,
+  `cover_reduction = combat_cell.cover * 0.4`) — proof that
+  "terrain-property-scales-a-gameplay-outcome" is an established pattern
+  in this codebase, even though cover (damage reduction) and visibility
+  (detection) are conceptually distinct.
+- `military_zones()` already surfaces `avg_cover` as a brain-facing
+  per-zone field.
+
+**Purely aspirational, not infrastructure — verified, not assumed:**
+- `CommanderKnowledge`'s docstring lists `known_enemy_units`,
+  `intel_confidence` as "Future extensions" — no such fields exist as
+  actual dataclass fields. Confirmed by reading the full 75-line file.
+- `HILL.visibility_bonus: 0.40` — defined in `TERRAIN_PHYSICS`, confirmed
+  via grep to be read nowhere in the codebase. Caught myself almost
+  over-interpreting this: dead code is evidence something wasn't built,
+  not evidence of an intended final design (a caution the review chain
+  explicitly raised, correctly).
+- No `SCOUT` unit type exists — exactly 4 types (`INFANTRY, CAVALRY,
+  ARCHER, SIEGE`), confirmed by reading the full `UnitType` enum.
+- No hidden/reserve concept exists anywhere in `Unit` or `BattleState`.
+
+### The architectural fork this audit surfaced
+
+Two fundamentally different things "hidden armies" could mean, with very
+different implementation costs:
+- **Model A (composition uncertainty)** — count/health/morale/supply stay
+  perfectly known; only type breakdown is uncertain. Small, perception-
+  layer-only change.
+- **Model B (existence uncertainty)** — an entire force could be genuinely
+  unknown. Requires real new simulator state that doesn't exist anywhere
+  today.
+
+This fork was elevated as a major finding rather than resolved unilaterally
+— presented for a design decision rather than picked based on "which is
+easier to build."
+
+### Design conversation (Arman + supervisor review, after the audit)
+
+Resolved into a staged capability model, not a single realism-level
+commitment — E1 (Information Enhancement) → E2 (Information Availability)
+→ E3 (Hidden Entities) → E4 (Operational Intelligence), each stage adding
+exactly one capability, advancement evidence-gated exactly like D023-D027
+(don't advance until the current stage demonstrably limits the General).
+
+**Arman's two contributions that shaped the final design, both
+independently sound and both now permanent in ARCHITECTURE.md:**
+1. "No remembered or pre-existing info — some estimation might be there
+   depending on different factors." This became E2's staleness/decay model
+   — in-battle tactical intel should decay like real fog-of-war knowledge,
+   not persist as a remembered fixed fact once observed. Verified this
+   doesn't conflict with `WorldModel`/`DoctrineExtractor`'s cross-battle
+   learning: those operate on a completely different timescale (permanent,
+   slow-changing, accumulated across hundreds of games) from single-battle
+   tactical intel (fast-decaying). Two systems, two timescales, same
+   underlying belief+confidence language — not a contradiction.
+2. "By mountains I also meant elevation level... but there is also a
+   possibility it can be near to zero if very thick forest under mountain."
+   This directly produced the permanent factor-based visibility principle
+   in ARCHITECTURE.md — visibility must emerge from independent factors
+   (elevation, occlusion, weather, observer quality, target behavior)
+   rather than terrain-TYPE lookup tables, because type-based rules can't
+   represent exactly this case (dense forest on a mountain). This also
+   retroactively reclassifies `HILL.visibility_bonus` from "reusable hook"
+   (my earlier framing during the raw audit) to "example of the anti-pattern
+   this principle exists to prevent" — should not be revived as-is.
+
+**Detection vs. Identification** — established as a permanent distinction,
+not a synonym pair: can the General tell something is there (detection) vs.
+can he tell what it is (identification). E1 improves identification only;
+E2/E3 are where detection itself starts depending on the factor model.
+
+### Full specification now permanent
+
+ARCHITECTURE.md's new "Perception & Observation Architecture" section is
+the complete record — the equivalent of D014's four artifacts, produced
+before any Candidate E code exists, matching exactly the discipline that
+made Candidate D's six phases go cleanly.
+
+### What's NOT done yet — implementation has not started
+
+E1's audit + design work is complete, but the concrete implementation plan
+is not written: what specific fields change on `CommanderKnowledge`, what a
+"scout" concretely is in this architecture (unit type / commander action /
+abstracted capability — to be resolved by what E1 actually needs, not
+decided in the abstract per the earlier review's caution), what the
+confidence-gating mechanism looks like precisely. Per the discipline used
+for every phase of Candidate D: state the plan, wait for confirmation,
+then implement. Do not start writing scout code without that explicit step.
+
+---
+
 ## Candidate D Phase 6 — Facade cleanup (COMPLETE) — CANDIDATE D CLOSED
 
 Final phase. Scoped as agreed: delegation verification, dead import/code

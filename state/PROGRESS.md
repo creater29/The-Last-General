@@ -498,10 +498,60 @@ reader without this reconciliation).
 reopening it unless new evidence emerges (D023/D024/D025/D026/D027 each
 have explicit, evidence-based re-evaluation triggers — none are timelines).
 
-### Candidate E — Scout Mechanics [NOT STARTED]
-- Hidden armies, scout report success/failure, intel confidence
-- Touches Stage 1 files (battle.py, grid.py)
-- Deferred until D is done
+### Candidate E — Scout Mechanics (Perception Enhancement, Stage E1) [AUDIT + DESIGN COMPLETE — implementation not yet started]
+
+**Prerequisite work done before any implementation, matching D014's rigor:**
+1. Full audit of `battle.py`, `grid.py`, `snapshot.py`, existing hooks —
+   see SESSION_HANDOFF for the complete findings.
+2. Design conversation (Arman + supervisor review) establishing the target
+   realism level and staged capability model.
+3. Full specification now permanent in ARCHITECTURE.md's "Perception &
+   Observation Architecture" section — the equivalent of D014's four
+   artifacts, produced before Phase 1 began for Candidate D.
+
+**Key audit findings (verified against actual code, not assumed):**
+- Enemy count is always perfectly known today — `known_enemy_presence` is
+  computed from `self.player_units` (complete simulator truth), zero
+  spatial/distance filtering anywhere in the codebase.
+- Only composition is currently hidden, and only live — `_unit_summary()`
+  persists exact `unit_types` into every episode; `PlayerProfiler` already
+  learns `preferred_units` from that historical data. Cross-battle learning
+  precedent already exists and works.
+- Combat execution (`_execute_general_intent()`) operates on complete
+  simulator truth regardless of what `CommanderKnowledge` exposes — a
+  perception change needs zero changes to combat resolution.
+- `known_friendly_state` already has a reusable boolean-flag shape
+  (`has_siege`, `has_cavalry`) that E1 can reuse for enemy composition,
+  gated by confidence rather than always-true.
+- `HILL.visibility_bonus` (grid.py) is dead — defined, never read. Per the
+  factor-based visibility principle (ARCHITECTURE.md), this should NOT be
+  revived as-is when E2 eventually happens — it's the exact terrain-type-
+  coupled pattern that principle rejects.
+- No `SCOUT` unit type exists (4 types: INFANTRY, CAVALRY, ARCHER, SIEGE).
+- No hidden/reserve concept exists anywhere in `Unit` or `BattleState`.
+
+**Target realism, staged (full detail in ARCHITECTURE.md):**
+E1 (Information Enhancement, current target) → E2 (Information Availability)
+→ E3 (Hidden Entities) → E4 (Operational Intelligence). Each stage adds
+exactly one capability. Advancement is evidence-gated — do not move to the
+next stage until the current one demonstrably limits the General's decision
+quality. Same discipline as D023-D027.
+
+**E1 scope (the actual next implementation target):**
+- Enemy count/health/morale/supply stay exactly as they are today
+- Composition becomes knowable, imperfectly, via a scout mechanism —
+  confidence-gated, not binary success/fail
+- Touches only the perception layer (`to_brain_snapshot()`,
+  `CommanderKnowledge`) — verified zero changes needed to combat execution
+- No hidden armies, no terrain-based detection yet (that's E2/E3)
+- Explicit non-goal: do not build E2/E3/E4 machinery now
+
+**Not yet done — before implementation can begin:**
+A concrete E1 implementation plan (what fields change, what a "scout"
+concretely is — unit type vs. commander action vs. abstracted capability —
+resolved by what E1 actually needs, not decided in the abstract) — matching
+the "explain the plan, wait for confirmation" discipline used for every
+phase of Candidate D.
 
 ---
 

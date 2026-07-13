@@ -271,6 +271,110 @@ than two small diagnostic queries.
 
 ---
 
+## Perception & Observation Architecture (Permanent)
+
+Established during the Candidate E design review (audit + design conversation,
+2026-06-28), before any scout-mechanics code was written — same discipline
+as D014's artifacts preceding Phase 1.
+
+### Permanent principle
+
+**The General reasons from observations, not simulator truth. Observations
+emerge from independent environmental and operational factors — terrain,
+elevation, vegetation/occlusion, weather, observer capability, target
+behavior — rather than single hardcoded terrain-type rules.**
+
+This rules out patterns like `HILL: visibility_bonus = 0.40` (terrain TYPE
+directly granting a visibility number) in favor of composable factors that
+combine per-situation. The reason: terrain-type rules produce contradictions
+a factor model doesn't — dense forest on a mountain, a ridge overlooking open
+plain, fog on a clear field. Elevation answers "how far could I potentially
+see." Vegetation/occlusion answers "how much of that horizon is actually
+visible." Weather answers "how well can I identify what I'm looking at."
+Observer quality (a scout's skill) and target behavior (marching in the open
+vs. hiding in woods) are separate factors again. Each contributes
+independently; none of them alone determines the outcome.
+
+**Audit correction this principle produced:** `grid.py`'s `HILL.visibility_bonus`
+(found during the Candidate E audit, confirmed dead — defined, never read
+anywhere) should NOT be revived as-is when visibility mechanics are eventually
+built. It represents exactly the terrain-type-coupled pattern this principle
+rejects. Its existence is evidence something was once considered, not evidence
+of an intended final design (dead code is never treated as a design commitment
+in this project — same discipline already applied to `counter_doctrines` and
+the pre-R006 `player_profiles` methods).
+
+### Detection vs. Identification (a permanent distinction, not a synonym pair)
+
+- **Detection** — can the General tell something is there at all? ("Movement
+  in the trees.")
+- **Identification** — can the General tell what it is? ("Looks like cavalry.")
+
+These are different problems with different failure modes and different
+confidence levels. A force can be detected without being identified. Candidate
+E's staged model (below) deliberately improves identification first (E1) before
+touching detection (E2/E3) — because identification failure is cheap to model
+(perception layer only) while detection failure requires new simulator state
+(a "hidden/reserve" concept that does not exist anywhere in `Unit` or
+`BattleState` today — verified during the audit, not assumed).
+
+### Staged capability model for Candidate E (not a realism-level commitment)
+
+Framed as capabilities the simulator gains, not realism levels the project
+commits to reaching. Each stage adds exactly one capability — the same
+discipline that made Stage 2's brain subsystems (WorldModel → Doctrine →
+PlayerProfile → Relationship) work. **Advancement between stages is
+evidence-gated, identical in spirit to D023-D027: do not advance to the next
+stage until the current stage has demonstrably limited the General's decision
+quality. These are not a roadmap with a deadline.**
+
+**E1 — Information Enhancement (current Candidate E target).** The simulator
+still knows enemy armies exist and roughly how strong they are — exactly as
+today (`known_enemy_presence`'s count/health/morale/supply aggregate is
+unchanged). Composition becomes knowable, imperfectly, via scouting — reusing
+the boolean-flag shape already proven on `known_friendly_state`
+(`has_siege`, `has_cavalry`), gated by a confidence signal rather than
+always-true. No hidden armies. No terrain-based visibility yet. Touches only
+the perception layer (`to_brain_snapshot()`, `CommanderKnowledge`) — combat
+execution (`_execute_general_intent()` and friends) needs zero changes, since
+it already operates on complete simulator truth independent of perception
+(verified during the audit).
+
+**E2 — Information Availability.** Detection (not just identification) starts
+depending on the factor model above — terrain, elevation, weather, distance.
+Information can go stale: no memory of old facts as permanent truth, only
+decaying belief ("scout reported cavalry yesterday; two days with no new
+report; belief in that fact should now be weaker, not remembered as fixed").
+This is a genuinely different kind of "memory" from `WorldModel`/
+`DoctrineExtractor`'s cross-battle learning — those accumulate permanent,
+slow-changing belief across hundreds of games; in-battle tactical intel about
+one specific enemy force in one specific battle should decay on a much faster,
+single-battle-scoped timescale. Not a contradiction; two different systems at
+two different timescales, same underlying belief+confidence language.
+
+**E3 — Hidden Entities.** The simulator itself changes — this is the line E1/E2
+don't cross. Forces can genuinely exist without ever being detected; failure to
+detect means no report exists, not a low-confidence report. Requires real new
+simulator state (a hidden/reserve concept on `Unit`/`BattleState`) that nothing
+in E1/E2 needed.
+
+**E4 — Operational Intelligence.** Reports become time-delayed events (scout
+departs → travels → finds enemy → returns → report arrives), not instantaneous
+snapshot updates. Messengers can fail. Reports can be wrong. This is the
+farthest stage from what exists today.
+
+### Long-term aspiration (not committed, explicitly deferred)
+
+`WorldModel` already speaks in `belief + confidence` pairs. The long-term
+direction — not started, not scheduled, evidence-gated like everything else —
+is for all knowledge subsystems to eventually share that same language:
+`{enemy_cavalry: present, confidence: 0.81}`, `{enemy_siege: unknown,
+confidence: 0.28}`. This is architecturally elegant (one vocabulary across
+doctrine, profile, relationship, and perception) but is explicitly NOT part of
+E1's scope — noted here so the direction isn't lost, not as a commitment.
+
+---
+
 ## Core Data Structures
 
 ### Cell
