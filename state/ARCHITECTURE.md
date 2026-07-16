@@ -271,11 +271,92 @@ than two small diagnostic queries.
 
 ---
 
+## E001 — Information Model (Permanent)
+
+Required by supervisor review before any Candidate E implementation: D014
+documented *software* architecture (which module owns what). Candidate E
+needs *information* architecture first (what can the General know, and
+under what rules) — a different, foundational layer that the Perception &
+Observation Architecture section below builds on, not a restatement of it.
+
+Every category below is graded against the actual current codebase —
+verified by reading the real implementation of each subsystem, not
+theorized. Several answers below correct an assumption made earlier in
+this same design process (see "Confidence and decay are not universal").
+
+### Information categories
+
+| Category | Lifetime | Source | Confidence today? | Decay today? |
+|---|---|---|---|---|
+| Own forces (`known_friendly_state`) | Turn-scoped, recomputed live | Direct observation | No — stated as fact, not belief | No |
+| Enemy aggregate presence (count/health/morale/supply) | Turn-scoped, recomputed live | Direct observation (simulator-granted, not spatially earned — see note below) | No | No |
+| Visible terrain / visible events | Turn-scoped (events), battle-scoped (terrain) | Direct observation | No | No |
+| Weather | Turn-scoped | Direct observation | No | No |
+| Enemy composition (E1, not yet built) | Battle-scoped | Scout (new) | **Yes — this is what E1 adds** | Not in E1; staleness is explicitly E2's job |
+| Terrain knowledge (`WorldModel`) | Permanent, cross-battle | Inference from repeated observation | Yes | No — fully recomputed from the full observation set each time, not decayed |
+| Doctrine | Permanent, cross-battle | Extracted from terrain knowledge (repeated pattern) | Yes | Yes — but failure-triggered only, never time-based |
+| Player profile tendencies | Permanent, cross-battle | Historical episode data | No | No |
+| Relationship / trust | Permanent, cross-battle | Battle outcomes (win/loss) | No — `trust_level` is itself the only value, no separate confidence-in-trust | No — only moves on win/loss, never drifts toward neutral over time |
+
+**Note on "enemy aggregate presence" source:** calling this "direct
+observation" is generous — verified during the audit that count/health/
+morale/supply are computed from complete simulator truth with zero spatial
+filtering, i.e. simulator-granted omniscience for aggregates specifically,
+not something the General earned by seeing anything. This is a deliberate
+existing simplification, not a bug, and E1 does not change it — E1 only
+adds a genuinely-earned (scout-gated) layer on top: composition.
+
+### Confidence and decay are not universal today — a correction
+
+An earlier framing in this design process treated "belief + confidence" as
+already the system's common language, with a long-term aspiration to make
+it fully universal. Verified against the actual implementations: only
+Doctrine and Terrain Knowledge have confidence at all; Player Profile and
+Relationship have none. Only Doctrine decays, and only on failure events —
+nothing in the codebase today decays with the mere passage of time. E2's
+proposed "intel goes stale absent new reports" would introduce a genuinely
+new decay mechanism (time-based), not extend an existing one. E001 states
+this precisely so the eventual E1/E2 technical specs build on what's
+actually there, not on an assumed-more-uniform system.
+
+### Simulator truth — never visible (the hard boundary)
+
+Explicit contract between simulator and brain, extending the principle
+already established in Stage 1 (`TERRAIN_PHYSICS` is simulator ground
+truth; the General never starts knowing it, only learns `terrain_knowledge`
+through observation). Never crosses into `CommanderKnowledge`, at any
+future E-stage:
+- Exact RNG outcomes / seeds
+- Individual (non-aggregate) enemy unit HP, position, or type — until
+  earned through a scouting mechanism that doesn't exist yet
+- Future actions or intents before they're chosen by either side
+- Unreported observations (once E2/E3 introduce the concept of a "report"
+  — an event that was never scouted/witnessed stays permanently unknown,
+  not inferable by the brain from simulator internals)
+- Raw `TERRAIN_PHYSICS` constants (the General learns `terrain_knowledge`
+  beliefs from repeated observation; he never starts knowing the physics
+  directly — this rule already existed for Stage 1/2 and simply extends
+  unchanged to Candidate E)
+
+### What a "scout" is — deliberately not decided here
+
+Per the review's explicit caution: do not let implementation vocabulary
+force game-design vocabulary. E001 defines information rules, not units or
+classes. The question "what is a scout" (unit type / commander action /
+abstracted observation capability) belongs to the E1 Technical
+Specification, which comes after this document and is scoped by asking
+"what is the minimum abstraction E1's information rules above actually
+require" — not decided in the abstract, and not decided here.
+
+---
+
 ## Perception & Observation Architecture (Permanent)
 
 Established during the Candidate E design review (audit + design conversation,
 2026-06-28), before any scout-mechanics code was written — same discipline
-as D014's artifacts preceding Phase 1.
+as D014's artifacts preceding Phase 1. Builds on E001 (above) — read that
+first; this section covers the staged capability roadmap and the visibility
+principle specifically, not the underlying information rules.
 
 ### Permanent principle
 
