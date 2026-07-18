@@ -456,6 +456,103 @@ E1's scope — noted here so the direction isn't lost, not as a commitment.
 
 ---
 
+## E1 Technical Specification (Permanent)
+
+Required before implementation, per supervisor review. Still architecture,
+not code — the concrete spec for E1 specifically, building on E001's rules
+and this section's staged roadmap. Four required constraints, all applied
+throughout: describe **Observation Producers**, never a specific unit or
+mechanism name; keep battle-scoped confidence explicitly separate from
+permanent cross-battle confidence (E001 already found these are different
+things, not one system); state what does NOT change; justify every new
+field by which decision it improves, grounded in the actual current
+`DecisionEngine` logic, not generic reasoning.
+
+### 1. What new information enters CommanderKnowledge — exactly, no more
+
+One new field: `known_enemy_composition`. Structure:
+```python
+known_enemy_composition: Optional[dict] = None
+# When present: {"cavalry": bool, "siege": bool, "confidence": float}
+# When None: no observation has been made this battle — the General
+# knows nothing about composition, not "composition is empty/absent"
+```
+Deliberately narrow — only the two unit-type flags that map to something
+`DecisionEngine` already reasons about (see justification table). Not
+archer/infantry presence, not exact counts, not positions. Nothing else
+changes on `CommanderKnowledge`.
+
+### 2. How confidence is computed — conceptually, not mathematically yet
+
+Battle-scoped confidence, explicitly NOT the same concept as Doctrine's or
+Terrain Knowledge's permanent cross-battle confidence, even though it
+reuses the word. E001 already established these are different systems that
+happen to share vocabulary — stating it again here because it's the exact
+distinction the review required not be lost when writing this spec.
+
+E1's confidence answers one question: how much should this turn's decision
+trust this particular observation? It exists once, is used for the current
+turn's decision, and is not persisted, not learned across battles, and not
+combined with any other subsystem's confidence value. No decay in E1 (E001
+already established nothing in the codebase does time-based decay today —
+E1 does not introduce it either; that's explicitly E2's job, not this
+spec's).
+
+### 3. Who produces observations
+
+An **Observation Producer** — the general concept, not a unit or mechanism.
+E1 implements exactly one instance: **Reconnaissance**, triggered as part
+of normal turn resolution (mechanism TBD at implementation time — this spec
+intentionally does not commit to cavalry, a dedicated unit, or a commander
+action, per the review's explicit requirement). Future Observation
+Producers (watchtower, ally report, prisoner, civilian, signal fire) are
+not part of E1 and require no architecture change to add later, provided
+they all produce the same `known_enemy_composition` shape.
+
+### 4. Who consumes them
+
+`DecisionEngine` only, specifically a new `_composition_factor()` (module-
+level function, same pattern as `_doctrine_factor`/`_player_factor`/
+`_situation_factor`/`_relationship_factor`). Not `WorldModel` — composition
+is not a terrain belief. Not `PlayerProfiler` — that's a different question
+(cross-battle player tendency) and already answered from `player_unit_summary`
+in past episodes, unrelated to live in-battle composition. Not `Logger` —
+`known_enemy_composition` is battle-scoped, not persisted (see below).
+
+### 5. What does NOT change (explicit, per review requirement)
+
+- Combat execution — every `_execute_*_intent()` branch already operates on
+  complete simulator truth independent of `CommanderKnowledge` (verified
+  during the Candidate E audit); E1 adds zero changes here
+- Physics (`physics.py`) — untouched
+- The doctrine/observation learning pipeline (`WorldModel`,
+  `DoctrineExtractor`, `ObservationStore`) — untouched; composition is not
+  an observation in the doctrine-formation sense
+- `PlayerProfiler`'s existing composition learning from past episodes
+  (`preferred_units`, already reading `player_unit_summary.unit_types`) —
+  unrelated system, unchanged
+- Persistence — `known_enemy_composition` is NOT written to the `episodes`
+  table or any store; it is computed fresh each turn from that turn's
+  Reconnaissance state and discarded. (`_unit_summary()`'s existing exact
+  `unit_types` logging for post-battle `PlayerProfiler` learning already
+  covers cross-battle learning — E1 doesn't need composition to persist,
+  since decisions are what needs it, not the historical record.)
+- `known_friendly_state`, `known_enemy_presence` (count/health/morale/
+  supply), `visible_terrain`, `visible_events`, `weather` — all unchanged
+
+### Field justification table
+
+| New field | Consumer | Decision improved (grounded in actual current logic) |
+|---|---|---|
+| `known_enemy_composition["siege"]` | `DecisionEngine._composition_factor()` | `DEFENSIVE_HOLD` (a `_CAUTIOUS` intent, per `decision_engine.py:353`) currently scores the same whether or not the enemy can break walls. Confirmed siege presence should reduce `DEFENSIVE_HOLD`'s factor — holding behind walls against confirmed siege units is a different risk than holding against infantry. |
+| `known_enemy_composition["cavalry"]` | `DecisionEngine._composition_factor()` | `doctrine_forest_cavalry_tree_fall` and `doctrine_frozen_lake_cavalry_ice_break` (real doctrine IDs, verified in production DB) are specifically about *enemy* cavalry triggering terrain events. Today `_doctrine_factor()` matches these based on visible terrain only, with no signal about whether this specific enemy actually has cavalry to trigger them. Confirmed cavalry presence should sharpen — not create — `TERRAIN_EXPLOIT`'s doctrine-driven score on forest/frozen_lake terrain. |
+| `known_enemy_composition["confidence"]` | `DecisionEngine._composition_factor()` | Without this, there's no way to distinguish "I don't know their composition" (`known_enemy_composition is None`) from "I have a weak, low-confidence read." Confidence lets a weak observation move the score less than a strong one, rather than either being ignored entirely or trusted fully — the same problem D027's "analytics vs. pipeline-dependent" distinction exists to prevent: don't let unreliable information count as much as reliable information. |
+
+Every row answers the review's required question directly. No field is
+included that doesn't map to an existing, named point in `DecisionEngine`.
+
+---
+
 ## Core Data Structures
 
 ### Cell
