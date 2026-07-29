@@ -7,6 +7,97 @@
 
 ---
 
+## NEXT WORK: Candidate E — E1 Implementation (NOT YET STARTED)
+
+Full architecture sequence complete (Audit → Perception Architecture →
+E001 → E1 Technical Specification → E1 Implementation Plan), all
+permanent in ARCHITECTURE.md. Implementation has not started.
+
+The next session's first task is to CONFIRM the implementation plan, then
+implement. Per standing project discipline: read the relevant files fresh,
+state the implementation plan explicitly, wait for confirmation, then code.
+
+### What to implement (summary — full detail in ARCHITECTURE.md "E1 Implementation Plan")
+
+Three source files change. Everything else is explicitly untouched.
+
+**Step 1 — `src/simulator/snapshot.py`** (lowest risk, isolated)
+Add one field to `CommanderKnowledge`:
+```python
+known_enemy_composition: Optional[dict] = None
+# When present: {"cavalry": bool, "siege": bool, "confidence": float}
+# When None: no observation this turn
+```
+Compatibility is pre-verified: all 3 direct CommanderKnowledge callers
+(test_snapshot.py:40, test_snapshot.py:146, test_decision_engine.py:108)
+use keyword arguments exclusively — confirmed by direct read, not assumed.
+Adding with `field(default=None)` requires zero changes to any existing caller.
+
+**Step 2 — `src/simulator/battle.py`** (`to_brain_snapshot()` only)
+Add a reconnaissance confidence step inside `to_brain_snapshot()`, using
+two factors already available in that method:
+1. Weather (fog/blizzard reduce confidence; clear/other are baseline)
+2. Visible terrain (forest = high occlusion/cover, reduces confidence;
+   open/road are baseline)
+Confidence range [0.0, 1.0]. If >= threshold (suggest 0.4, verify at
+implementation time against actual weather/terrain value ranges): populate
+`known_enemy_composition` with live unit-type presence + confidence score.
+If < threshold: leave `None`.
+Read `to_brain_snapshot()` fresh before editing — don't work from memory.
+
+**Step 3 — `src/brain/decision_engine.py`**
+Add module-level `_composition_factor(knowledge: CommanderKnowledge)`:
+- `knowledge.known_enemy_composition is None` → return 1.0 (no influence)
+- `confidence = 0.0` → return 1.0 (zero-confidence = same as None)
+- `siege: True` + high confidence → penalize `DEFENSIVE_HOLD` (a `_CAUTIOUS`
+  intent per `decision_engine.py:353` — holding against confirmed siege is
+  a different risk than holding against infantry)
+- `cavalry: True` + high confidence → boost doctrine relevance when visible
+  terrain includes forest/frozen_lake (`INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`
+  and `AMBUSH`'s forest relevance — confirmed by reading the actual constants
+  at `decision_engine.py:70-73`)
+Wire into `decide()` after `_relationship_factor()`. Add
+`composition_used: bool` to return dict (True when composition is non-None
+AND confidence > 0).
+Read `decision_engine.py` fresh before editing — factor function pattern
+already established by 4 prior functions, follow it exactly.
+
+### Tests to add
+
+Per-file, same discipline as Candidate D phases:
+- `test_snapshot.py`: field defaults to None; populated when reconnaissance
+  fires; remains None when confidence below threshold
+- `test_decision_engine.py`: _composition_factor() with None → 1.0; with
+  siege True + high confidence → DEFENSIVE_HOLD penalized; with cavalry
+  True + high confidence on forest terrain → TERRAIN_EXPLOIT or AMBUSH
+  boosted; with confidence = 0.0 → 1.0
+- `test_battle.py`: to_brain_snapshot() populates known_enemy_composition
+  in appropriate weather/terrain conditions; does NOT always populate it
+  (confidence-gated, not always-on); existing snapshot tests still pass
+- `run_integration_test.py`: add 10th and 11th criteria (see ARCHITECTURE.md
+  "E1 integration success criteria")
+
+### Audit before writing any code (standing rule)
+
+Before touching any file:
+```bash
+grep -n "known_enemy_composition" src/ tests/ scripts/ -r  # check for pre-written code
+python3 -m pytest tests/ --co -q 2>&1 | tail -3           # check actual test count
+```
+Same discipline that caught pre-written code in Candidates A and B.
+
+### Scope guard (repeat from ARCHITECTURE.md for next-session visibility)
+
+Forbidden from entering E1 under any framing:
+- Information aging, staleness, confidence decay over time → E2
+- Terrain-based detection (whether the army is known to exist) → E2/E3
+- Hidden reserves not in player_units → E3
+- Multiple concurrent Observation Producers → E2+
+- known_enemy_composition persisted to any store → not in scope
+- Any new UnitType enum value → not required by E1
+
+---
+
 ## Candidate E — Audit + Design (COMPLETE) — implementation NOT started
 
 Same discipline as D014: full architecture review before any code, held to

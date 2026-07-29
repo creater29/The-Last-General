@@ -553,6 +553,109 @@ included that doesn't map to an existing, named point in `DecisionEngine`.
 
 ---
 
+## E1 Implementation Plan (Permanent — the implementation contract)
+
+Required by supervisor review before any E1 code is written. The
+file-by-file table is the contract that prevents scope creep. The failure-
+mode and compatibility sections are required explicitly by the review.
+
+### File-by-file contract
+
+| File | Change | Type |
+|---|---|---|
+| `src/simulator/snapshot.py` | Add `known_enemy_composition: Optional[dict] = None` as the last field, with `field(default=None)` | Modify |
+| `src/simulator/battle.py` | Update `to_brain_snapshot()`: add a reconnaissance confidence computation step; if confidence >= threshold, populate `known_enemy_composition`; otherwise leave `None` | Modify |
+| `src/brain/decision_engine.py` | Add module-level `_composition_factor(knowledge: CommanderKnowledge)` (same pattern as all prior factor functions); wire into `decide()` scoring loop; add `composition_used: bool` to return dict | Modify |
+| `tests/test_snapshot.py` | Add: field defaults to None; to_brain_snapshot() populates it when reconnaissance fires; existing tests unchanged | Modify |
+| `tests/test_decision_engine.py` | Add: _composition_factor() with None → 1.0; with high-confidence siege → DEFENSIVE_HOLD adjusted; with high-confidence cavalry → forest/frozen_lake doctrine relevance adjusted; existing tests unchanged | Modify |
+| `tests/test_battle.py` | Add: to_brain_snapshot() populates known_enemy_composition in appropriate conditions; doesn't always populate it (confidence-gated, not always-on) | Modify |
+| `scripts/run_integration_test.py` | Add a 10th success criterion: known_enemy_composition was non-None on at least some turns (proves Observation Producer fires at all in a live battle); existing 9 criteria unchanged | Modify |
+| `src/simulator/units.py` | No change — no new UnitType added | **Explicitly untouched** |
+| `src/simulator/physics.py` | No change | **Explicitly untouched** |
+| `src/simulator/grid.py` | Values READ for confidence computation (visibility-adjacent terrain properties, e.g. cover), but no modifications | **Explicitly untouched** |
+| `src/brain/world_model.py` | No change — composition is not a terrain belief | **Explicitly untouched** |
+| `src/brain/doctrine_extractor.py` | No change | **Explicitly untouched** |
+| `src/brain/player_profiler.py` | No change — cross-battle composition learning from episodes continues unchanged; this is a different system at a different timescale | **Explicitly untouched** |
+| `src/brain/relationship_manager.py` | No change | **Explicitly untouched** |
+| All `src/simulator/stores/` files | No change — `known_enemy_composition` is battle-scoped, never persisted | **Explicitly untouched** |
+
+### Reconnaissance mechanism (the E1 Observation Producer)
+
+`to_brain_snapshot()` adds one reconnaissance confidence step, computed
+from environmental factors already present in the battle state at snapshot
+time. Two factors, both named in E001's factor-based visibility principle:
+1. **Weather** — fog and blizzard reduce confidence; clear/other are
+   baseline. Uses the same `weather` field already in `CommanderKnowledge`.
+2. **Visible terrain** — forest terrain (high occlusion factor, high
+   `base_cover`, verified in grid.py) near the enemy position reduces
+   confidence. Open/road terrain is baseline.
+
+Confidence range: [0.0, 1.0]. If confidence >= threshold (exact value
+decided at implementation time, suggested 0.4 — gives "uncertain but
+useful" by default), `known_enemy_composition` is populated with the
+actual unit-type presence flags plus the confidence value. If below
+threshold, `known_enemy_composition = None` (no observation this turn).
+
+The exact formula is determined at implementation time after reading the
+current `to_brain_snapshot()` body carefully — this plan commits to the
+factors and the population condition, not the specific arithmetic.
+
+### Failure mode section
+
+| Scenario | E1 behavior |
+|---|---|
+| `known_enemy_composition is None` (no observation, or confidence below threshold) | `_composition_factor()` returns 1.0 for all intents — identical to today. This is the default for every turn until reconnaissance fires. |
+| `confidence = 0.0` | Treated as `None` — factor = 1.0, no influence. Zero-confidence observation is equivalent to no observation. |
+| Conflicting observations from multiple sources | **N/A in E1.** There is exactly one Observation Producer per turn (the reconnaissance step inside `to_brain_snapshot()`). Conflicting observations require multiple concurrent producers, which is E2+ territory. E1's architecture prevents this by design: one `to_brain_snapshot()` call per turn, one `known_enemy_composition` result per turn. |
+| Reconnaissance fires but enemy is already heavily depleted | No special handling. Composition is populated based on current live unit types regardless of count. If the enemy has zero cavalry remaining, `cavalry: False` is the correct observation. |
+
+### Compatibility section
+
+All three direct `CommanderKnowledge` constructors in the codebase were
+verified to use keyword arguments exclusively (confirmed by reading
+`test_snapshot.py:40`, `test_snapshot.py:146`, `test_decision_engine.py:108`
+directly — not assumed). Adding `known_enemy_composition: Optional[dict] =
+None` with `field(default=None)`:
+- Requires zero changes to any existing caller
+- All existing tests continue to pass without modification (callers that
+  don't specify the field get `None` automatically)
+- Default behavior (`_composition_factor` returns 1.0 when `None`) is
+  identical to today for all existing test scenarios
+
+### Scope guard — what is explicitly forbidden from E1
+
+The single biggest risk now is accidental E2 features. Explicitly forbidden
+from entering the E1 implementation under any framing:
+- Timestamps, report latency, or any concept of information aging → E2
+- Confidence decay over time, staleness, forgetting → E2
+- Terrain-based DETECTION (whether an army is known to exist) → E2/E3
+- Hidden reserves or units not in `player_units` → E3
+- Multiple concurrent Observation Producers or their merging → E2+
+- `known_enemy_composition` persisted to the database → explicitly not scope
+- Any new `UnitType` enum value → not required by E1
+
+### Permanent backward compatibility rule
+
+> Every Candidate E stage must preserve backward compatibility with earlier
+> perception stages unless that stage explicitly replaces them.
+
+E1 adds `known_enemy_composition`. E2 does not invalidate it — E2 extends
+the confidence model with decay, but the field shape remains valid. E3 does
+not remove E2's availability model. Each stage builds on the previous without
+breaking callers that were built for an earlier stage.
+
+### E1 integration success criteria (complete, the 10th criterion)
+
+1–9: All existing integration criteria from Candidates A-C remain unchanged
+10: `known_enemy_composition` is non-None on at least some turns during
+   a live battle (proves the Observation Producer fires in real conditions)
+11: When composition is known with high confidence and the enemy has cavalry,
+   turns with forest or frozen_lake terrain reflect it in `decide()`'s scoring
+   (doctrines for cavalry-dependent terrain events score differently than
+   when `known_enemy_composition is None`)
+
+---
+
 ## Core Data Structures
 
 ### Cell
