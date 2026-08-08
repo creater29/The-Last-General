@@ -34,11 +34,16 @@ use keyword arguments exclusively — confirmed by direct read, not assumed.
 Adding with `field(default=None)` requires zero changes to any existing caller.
 
 **Step 2 — `src/simulator/battle.py`** (`to_brain_snapshot()` only)
-Add a reconnaissance confidence step inside `to_brain_snapshot()`, using
-two factors already available in that method:
+Add a reconnaissance confidence step inside `to_brain_snapshot()`.
+**Two factors — corrected from earlier plan (supervisor review):**
 1. Weather (fog/blizzard reduce confidence; clear/other are baseline)
-2. Visible terrain (forest = high occlusion/cover, reduces confidence;
-   open/road are baseline)
+2. Target occlusion — derived from terrain of cells OCCUPIED BY PLAYER
+   UNITS (NOT from `visible_terrain`, which has no spatial relationship
+   to units — confirmed by reading `to_brain_snapshot()` directly).
+   The simulator has `self.player_units` with positions; use each unit's
+   position to look up the terrain cell it currently occupies. Forest-
+   occupied cells reduce confidence. Expose only the resulting confidence
+   number — no coordinates, no unit-level data enters `CommanderKnowledge`.
 Confidence range [0.0, 1.0]. If >= threshold (suggest 0.4, verify at
 implementation time against actual weather/terrain value ranges): populate
 `known_enemy_composition` with live unit-type presence + confidence score.
@@ -46,16 +51,26 @@ If < threshold: leave `None`.
 Read `to_brain_snapshot()` fresh before editing — don't work from memory.
 
 **Step 3 — `src/brain/decision_engine.py`**
-Add module-level `_composition_factor(knowledge: CommanderKnowledge)`:
-- `knowledge.known_enemy_composition is None` → return 1.0 (no influence)
-- `confidence = 0.0` → return 1.0 (zero-confidence = same as None)
-- `siege: True` + high confidence → penalize `DEFENSIVE_HOLD` (a `_CAUTIOUS`
+Add module-level `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`.
+**CORRECTED from earlier plan (supervisor review):** original plan specified
+`_composition_factor(knowledge)` — breaking the established pattern where
+every factor function takes `intent` first and returns `(factor, notes)`.
+Confirmed by reading all four existing factor function signatures directly.
+- `knowledge.known_enemy_composition is None` → return `(1.0, [])`
+- `confidence = 0.0` → return `(1.0, [])`
+- `siege: True` + high confidence → confidence-scaled penalty on `DEFENSIVE_HOLD` (a `_CAUTIOUS`
   intent per `decision_engine.py:353` — holding against confirmed siege is
   a different risk than holding against infantry)
-- `cavalry: True` + high confidence → boost doctrine relevance when visible
-  terrain includes forest/frozen_lake (`INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`
-  and `AMBUSH`'s forest relevance — confirmed by reading the actual constants
-  at `decision_engine.py:70-73`)
+- `cavalry: True` + forest in `knowledge.visible_terrain` + high confidence
+  → confidence-scaled boost on `AMBUSH` (forest in `INTENT_TERRAIN_RELEVANCE["AMBUSH"]`,
+  verified at `decision_engine.py:73` — cavalry in forest terrain is what
+  makes an ambush viable; knowing cavalry is present sharpens that)
+- `cavalry: True` + frozen_lake in `knowledge.visible_terrain` + high confidence
+  → confidence-scaled boost on `TERRAIN_EXPLOIT` (frozen_lake in
+  `INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`, verified at `decision_engine.py:71`)
+- **Do NOT modify `_doctrine_factor()`** — composition is its own independent
+  decision input with its own reasoning trace, not a modifier of doctrine
+  relevance; changing `_doctrine_factor()` would conflate two separate signals
 Wire into `decide()` after `_relationship_factor()`. Add
 `composition_used: bool` to return dict (True when composition is non-None
 AND confidence > 0).

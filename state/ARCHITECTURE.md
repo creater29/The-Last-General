@@ -565,7 +565,7 @@ mode and compatibility sections are required explicitly by the review.
 |---|---|---|
 | `src/simulator/snapshot.py` | Add `known_enemy_composition: Optional[dict] = None` as the last field, with `field(default=None)` | Modify |
 | `src/simulator/battle.py` | Update `to_brain_snapshot()`: add a reconnaissance confidence computation step; if confidence >= threshold, populate `known_enemy_composition`; otherwise leave `None` | Modify |
-| `src/brain/decision_engine.py` | Add module-level `_composition_factor(knowledge: CommanderKnowledge)` (same pattern as all prior factor functions); wire into `decide()` scoring loop; add `composition_used: bool` to return dict | Modify |
+| `src/brain/decision_engine.py` | Add module-level `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]` — exactly matching the signature of `_situation_factor` and `_relationship_factor`. Takes `intent` first (required by the scoring loop that calls all factor functions per-intent), returns `(factor, notes)`. Wire into `decide()` scoring loop after `_relationship_factor`. Add `composition_used: bool` to return dict. **Do NOT modify `_doctrine_factor()` — composition is its own independent decision input with its own reasoning trace, not a modifier of doctrine relevance.** | Modify |
 | `tests/test_snapshot.py` | Add: field defaults to None; to_brain_snapshot() populates it when reconnaissance fires; existing tests unchanged | Modify |
 | `tests/test_decision_engine.py` | Add: _composition_factor() with None → 1.0; with high-confidence siege → DEFENSIVE_HOLD adjusted; with high-confidence cavalry → forest/frozen_lake doctrine relevance adjusted; existing tests unchanged | Modify |
 | `tests/test_battle.py` | Add: to_brain_snapshot() populates known_enemy_composition in appropriate conditions; doesn't always populate it (confidence-gated, not always-on) | Modify |
@@ -582,23 +582,65 @@ mode and compatibility sections are required explicitly by the review.
 ### Reconnaissance mechanism (the E1 Observation Producer)
 
 `to_brain_snapshot()` adds one reconnaissance confidence step, computed
-from environmental factors already present in the battle state at snapshot
-time. Two factors, both named in E001's factor-based visibility principle:
-1. **Weather** — fog and blizzard reduce confidence; clear/other are
-   baseline. Uses the same `weather` field already in `CommanderKnowledge`.
-2. **Visible terrain** — forest terrain (high occlusion factor, high
-   `base_cover`, verified in grid.py) near the enemy position reduces
-   confidence. Open/road terrain is baseline.
+simulator-side using live battle state the simulator legitimately owns.
+
+**Corrected from earlier plan (supervisor review):** the phrase "forest near
+the enemy position" was not defined by the plan — `visible_terrain` in
+`CommanderKnowledge` is a battlefield-level list (terrain types that exist
+anywhere on the map, no spatial relationship to units — confirmed via direct
+read of `to_brain_snapshot()`). Implementing "forest near enemy" from
+`visible_terrain` alone would require coordinate-based lookups that violate
+the perception boundary. The correct approach: compute occlusion from the
+live enemy-occupied cells inside `to_brain_snapshot()` (the simulator has
+`self.player_units` with positions), then expose only the resulting
+confidence number — no coordinates, no unit-level data — to the brain.
+
+**Factors, simulator-side:**
+1. **Weather** — fog and blizzard reduce confidence; clear/other are baseline.
+2. **Target occlusion** — derived from the terrain of cells currently occupied
+   by player units (not from `visible_terrain`). Forest-occupied cells reduce
+   confidence (high `base_cover`, high `ambush_value` — both already in
+   `grid.py`'s terrain properties). Open/road-occupied cells are baseline.
 
 Confidence range: [0.0, 1.0]. If confidence >= threshold (exact value
-decided at implementation time, suggested 0.4 — gives "uncertain but
-useful" by default), `known_enemy_composition` is populated with the
-actual unit-type presence flags plus the confidence value. If below
-threshold, `known_enemy_composition = None` (no observation this turn).
+decided at implementation time after reading `to_brain_snapshot()`'s body
+carefully), `known_enemy_composition` is populated with:
+- `cavalry: bool` — True if any living player unit is `UnitType.CAVALRY`
+- `siege: bool` — True if any living player unit is `UnitType.SIEGE`
+- `confidence: float` — the computed score
 
-The exact formula is determined at implementation time after reading the
-current `to_brain_snapshot()` body carefully — this plan commits to the
-factors and the population condition, not the specific arithmetic.
+If below threshold: `known_enemy_composition = None` (no observation).
+The exact formula is implementation-time — this plan commits to the
+factors and population condition, not the specific arithmetic.
+
+**Specific intent behaviors `_composition_factor()` must produce (verified
+against actual constants in `decision_engine.py` before specifying these):**
+- `siege: True` + high confidence → confidence-scaled penalty on `DEFENSIVE_HOLD`
+  (`_CAUTIOUS` at line 353 — holding against confirmed siege is a different
+  risk than holding against infantry)
+- `cavalry: True` + forest visible terrain + high confidence → confidence-
+  scaled boost on `AMBUSH` (forest in `INTENT_TERRAIN_RELEVANCE["AMBUSH"]`,
+  line 73 — cavalry-in-forest is exactly the doctrine the General already has
+  for this terrain; knowing cavalry is present sharpens that relevance)
+- `cavalry: True` + frozen_lake visible terrain + high confidence →
+  confidence-scaled boost on `TERRAIN_EXPLOIT` (frozen_lake in
+  `INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`, line 71)
+- No observation / confidence = 0.0 / malformed / `None` → factor = 1.0
+  for all intents (identical to today — the backward-compatible default)
+- **Do not modify `_doctrine_factor()`** — composition is its own
+  independent decision input with its own reasoning trace, not a modifier
+  of doctrine relevance; changing `_doctrine_factor()` would conflate two
+  separate signals and break their individual traceability
+
+**Note on `visible_terrain` in `_composition_factor()`:** the intent-to-
+composition mappings above use `knowledge.visible_terrain` (battlefield
+terrain list) for the `AMBUSH`/`TERRAIN_EXPLOIT` boosts — this is correct,
+because those boosts ask "given that I know the enemy has cavalry, and given
+that this battlefield has forest/frozen_lake terrain, is this intent more
+relevant?" That question legitimately uses `visible_terrain`. The
+reconnaissance confidence computation (above) is the only part that needed
+fixing from the original plan — it now uses the simulator-side occlusion
+computation, not `visible_terrain`.
 
 ### Failure mode section
 
