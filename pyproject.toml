@@ -1,0 +1,13 @@
+[project]
+name = "general_brain"
+version = "0.3.0"
+description = "The Last General - AI brain for a centuries-old commander"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
