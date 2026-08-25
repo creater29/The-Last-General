@@ -556,7 +556,7 @@ included that doesn't map to an existing, named point in `DecisionEngine`.
 All values below become named constants in their respective modules, not
 magic numbers, so tests can import and reference them directly.
 
-**Reconnaissance constants (in `battle.py` near the top of `to_brain_snapshot()`):**
+**Reconnaissance constants (module-level in `battle.py`, so tests can import them directly):**
 ```python
 RECON_BASE_CONFIDENCE   = 0.6   # clear weather, open terrain baseline
 RECON_THRESHOLD         = 0.25  # minimum confidence to fire an observation
@@ -652,45 +652,36 @@ confidence number — no coordinates, no unit-level data — to the brain.
    confidence (high `base_cover`, high `ambush_value` — both already in
    `grid.py`'s terrain properties). Open/road-occupied cells are baseline.
 
-Confidence range: [0.0, 1.0]. If confidence >= threshold (exact value
-decided at implementation time after reading `to_brain_snapshot()`'s body
-carefully), `known_enemy_composition` is populated with:
+Confidence range: [0.0, 1.0]. Use constants `RECON_THRESHOLD`, `RECON_BASE_CONFIDENCE`,
+`RECON_WEATHER_PENALTY`, and `RECON_OCCLUSION_SCALE` — all defined in the
+"Scoring constants" section above. The formula and threshold are already
+decided; do not re-derive them at implementation time.
+
+When confidence >= `RECON_THRESHOLD`, `known_enemy_composition` is populated:
 - `cavalry: bool` — True if any living player unit is `UnitType.CAVALRY`
 - `siege: bool` — True if any living player unit is `UnitType.SIEGE`
 - `confidence: float` — the computed score
 
-If below threshold: `known_enemy_composition = None` (no observation).
-The exact formula is implementation-time — this plan commits to the
-factors and population condition, not the specific arithmetic.
+When confidence < `RECON_THRESHOLD`: `known_enemy_composition = None`.
 
-**Specific intent behaviors `_composition_factor()` must produce (verified
-against actual constants in `decision_engine.py` before specifying these):**
-- `siege: True` + high confidence → confidence-scaled penalty on `DEFENSIVE_HOLD`
-  (`_CAUTIOUS` at line 353 — holding against confirmed siege is a different
-  risk than holding against infantry)
-- `cavalry: True` + forest visible terrain + high confidence → confidence-
-  scaled boost on `AMBUSH` (forest in `INTENT_TERRAIN_RELEVANCE["AMBUSH"]`,
-  line 73 — cavalry-in-forest is exactly the doctrine the General already has
-  for this terrain; knowing cavalry is present sharpens that relevance)
-- `cavalry: True` + frozen_lake visible terrain + high confidence →
-  confidence-scaled boost on `TERRAIN_EXPLOIT` (frozen_lake in
-  `INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`, line 71)
-- No observation / confidence = 0.0 / malformed / `None` → factor = 1.0
-  for all intents (identical to today — the backward-compatible default)
-- **Do not modify `_doctrine_factor()`** — composition is its own
-  independent decision input with its own reasoning trace, not a modifier
-  of doctrine relevance; changing `_doctrine_factor()` would conflate two
-  separate signals and break their individual traceability
+**`_composition_factor()` intent behaviors — all values are concrete and
+reference the named `COMP_*` constants from the "Scoring constants" section:**
+- `siege: True` → factor for `DEFENSIVE_HOLD` = `1.0 - (COMP_SIEGE_PENALTY * confidence)`
+- `cavalry: True` + forest in `visible_terrain` → factor for `AMBUSH` = `1.0 + (COMP_CAVALRY_BOOST * confidence)`
+- `cavalry: True` + frozen_lake in `visible_terrain` → factor for `TERRAIN_EXPLOIT` = `1.0 + (COMP_CAVALRY_EXPLOIT * confidence)`
+- No observation / `confidence = 0.0` / malformed / `None` → factor = 1.0 for all intents
+- All other intents not listed above → factor = 1.0
 
-**Note on `visible_terrain` in `_composition_factor()`:** the intent-to-
-composition mappings above use `knowledge.visible_terrain` (battlefield
-terrain list) for the `AMBUSH`/`TERRAIN_EXPLOIT` boosts — this is correct,
-because those boosts ask "given that I know the enemy has cavalry, and given
-that this battlefield has forest/frozen_lake terrain, is this intent more
-relevant?" That question legitimately uses `visible_terrain`. The
-reconnaissance confidence computation (above) is the only part that needed
-fixing from the original plan — it now uses the simulator-side occlusion
-computation, not `visible_terrain`.
+`_composition_factor()` is fully independent of `_doctrine_factor()`. The
+two signals compose multiplicatively in `decide()`'s scoring loop; neither
+modifies the other's output. Do not modify `_doctrine_factor()`.
+
+**Note on `visible_terrain` in `_composition_factor()`:** the AMBUSH and
+TERRAIN_EXPLOIT boosts above correctly use `knowledge.visible_terrain`
+(battlefield-level terrain list). Those questions — "given confirmed cavalry,
+is there forest on this battlefield?" — are legitimately answerable from
+battlefield-level data. Only the reconnaissance confidence computation required
+simulator-side position data.
 
 ### Failure mode section
 
