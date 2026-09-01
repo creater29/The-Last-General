@@ -7,6 +7,92 @@
 
 ---
 
+## What was done this session (architectural review rounds for Candidate E E1)
+
+Full E1 specification passed through three supervisor review rounds before
+being approved for implementation. Each round found real issues, not
+nitpicking:
+
+- Round 1: `_composition_factor(knowledge)` signature wrong (should take
+  `intent` first, matching all four existing factor functions); reconnaissance
+  confidence used `visible_terrain` to mean "forest near enemy" which is
+  spatially undefined from that data.
+- Round 2: Two contradictions remained in ARCHITECTURE.md — stale "sharpens
+  doctrine-driven score" language at two locations despite the correction.
+  Boundary wording imprecise ("coordinate lookups that violate the boundary"
+  — coordinates are permitted inside the simulator; exposing them to the brain
+  is what's prohibited). No reproducible test environment existed.
+- Round 3: Two sections of ARCHITECTURE.md still contradicted each other —
+  the concrete constants section said values were fixed, but the reconnaissance
+  mechanism section still said "exact value decided at implementation time."
+  `RECON_*` constants placement said "near the top of to_brain_snapshot()"
+  (local scope) instead of module-level (required for test imports).
+
+All three rounds produced real corrections. The specification is now:
+- One source of truth (no contradictions between sections)
+- Concrete and testable (all values are named constants, all formulas
+  are deterministic, all factor outputs have exact worked examples)
+- Independent of `_doctrine_factor()` (explicitly stated, not just implied)
+- Reproducible (`requirements.txt` + `pyproject.toml` added, 402/402
+  verifiable by anyone who can clone the repo and `pip install -r requirements.txt`)
+
+---
+
+## ⚠️ NEW CHAT HANDOFF PROMPT (copy-paste this exactly)
+
+```
+I'm continuing development of "The Last General's Mind" project.
+You have full terminal access to my local machine via Desktop Commander MCP.
+
+Before doing anything else, run this verification:
+
+    cd ~/Projects/general_brain && python3 -m pytest tests/ --tb=short -q
+
+Then read these files in this exact order — fully, no skimming:
+1. state/CLAUDE_BRIEFING.md
+2. state/ARCHITECTURE.md
+3. state/PROGRESS.md
+4. state/KNOWN_ISSUES.md
+5. state/SESSION_HANDOFF.md
+6. state/DEFERRED_ITEMS.md
+
+Once you have read all six files and confirmed 402/402 tests pass, tell me:
+
+1. What Candidate E E1 is trying to achieve (in one sentence)
+2. What the three source files are that E1 changes, and what the explicitly
+   untouched files are
+3. What RECON_BASE_CONFIDENCE, RECON_THRESHOLD, and RECON_OCCLUSION_SCALE
+   are and where these constants must be defined (module level or local)
+4. What _composition_factor()'s signature is, and what it returns for
+   known_enemy_composition=None
+5. What the reconnaissance confidence formula is (deterministic, step by step)
+6. What the first implementation step is and why it is the lowest-risk starting point
+
+Do not start writing any code until I confirm your understanding is correct.
+```
+
+---
+
+## Current state for implementation
+
+All architecture is complete and approved. Implementation begins with
+`snapshot.py` — the lowest-risk, most isolated change. The SESSION_HANDOFF
+"NEXT WORK" section below has the full step-by-step plan. Read it fully
+before starting Step 1.
+
+Key facts the new instance must not assume (verified in this session):
+- All three direct `CommanderKnowledge` callers use keyword arguments
+  exclusively → adding `known_enemy_composition: Optional[dict] = None`
+  with `field(default=None)` requires zero changes to any existing caller
+- `RECON_*` constants must be MODULE-LEVEL in `battle.py`, not local to
+  `to_brain_snapshot()`, because tests must be able to import them
+- `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`
+  — takes intent first, exactly matching all four existing factor functions
+- `known_enemy_composition = None` → `_composition_factor()` returns `(1.0, [])`
+  for every intent — identical to today's behavior
+
+---
+
 ## NEXT WORK: Candidate E — E1 Implementation (NOT YET STARTED)
 
 Full architecture sequence complete (Audit → Perception Architecture →
