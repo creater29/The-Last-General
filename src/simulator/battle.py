@@ -58,6 +58,19 @@ WEATHER_CONDITIONS = ["clear", "fog", "heavy_rain", "blizzard", "wind"]
 
 
 # ---------------------------------------------------------------------------
+# Reconnaissance constants (Candidate E, E1) — module-level so tests can
+# import them directly. Formula and values are fixed by the approved E1
+# Technical Specification (ARCHITECTURE.md) — not re-derived here.
+# ---------------------------------------------------------------------------
+
+RECON_BASE_CONFIDENCE = 0.6   # clear weather, open terrain baseline
+RECON_THRESHOLD       = 0.25  # minimum confidence to fire an observation
+RECON_WEATHER_PENALTY = {"fog": -0.3, "blizzard": -0.5}
+                               # other weather values: 0
+RECON_OCCLUSION_SCALE = 0.4   # max penalty from target occlusion
+
+
+# ---------------------------------------------------------------------------
 # Turn Record — what happened in one turn
 # ---------------------------------------------------------------------------
 
@@ -281,6 +294,42 @@ class BattleLoop:
             "avg_supply": _avg(alive_enemy, "supply"),
         }
 
+        # Reconnaissance confidence (Candidate E, E1) — deterministic, no RNG.
+        # Two factors, both simulator-side: weather, and target occlusion
+        # (derived from the terrain cells alive_enemy units currently occupy,
+        # NOT from visible_terrain — that field has no spatial relationship
+        # to units). Only the resulting confidence number and unit-type
+        # booleans cross into CommanderKnowledge — no coordinates, no
+        # unit-level data.
+        if alive_enemy:
+            forest_occupied = sum(
+                1 for u in alive_enemy
+                if (cell := self.grid.get(*u.position)) is not None
+                and cell.terrain == TerrainType.FOREST
+            )
+            occlusion_fraction = forest_occupied / len(alive_enemy)
+        else:
+            occlusion_fraction = 0.0
+
+        recon_confidence = (
+            RECON_BASE_CONFIDENCE
+            + RECON_WEATHER_PENALTY.get(self.weather, 0)
+            - RECON_OCCLUSION_SCALE * occlusion_fraction
+        )
+        recon_confidence = max(0.0, min(1.0, round(recon_confidence, 3)))
+
+        known_enemy_composition: Optional[dict] = None
+        if recon_confidence >= RECON_THRESHOLD:
+            known_enemy_composition = {
+                "cavalry": any(
+                    u.unit_type == UnitType.CAVALRY for u in alive_enemy
+                ),
+                "siege": any(
+                    u.unit_type == UnitType.SIEGE for u in alive_enemy
+                ),
+                "confidence": recon_confidence,
+            }
+
         # Visible terrain — type strings only, no coordinates
         features = self.state.battlefield_features
         has_forest = bool(self.grid.cells_of_type(TerrainType.FOREST))
@@ -307,6 +356,7 @@ class BattleLoop:
             known_friendly_state  = known_friendly_state,
             visible_terrain       = visible_terrain,
             visible_events        = list(self.state.terrain_events),
+            known_enemy_composition = known_enemy_composition,
         )
 
     # ------------------------------------------------------------------

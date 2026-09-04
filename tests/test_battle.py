@@ -4,7 +4,7 @@ test_battle.py — Verify battle loop, intent execution, end conditions.
 import sys
 sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
 
-from simulator.grid import Grid
+from simulator.grid import Grid, TerrainType
 from simulator.units import UnitType, make_unit, make_group
 from simulator.battle import (
     BattleLoop, BattleState, TurnRecord,
@@ -289,6 +289,107 @@ def test_multi_battle_accumulation():
         results.add(state.result)
     # Should see multiple different outcomes across 10 battles
     assert len(results) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Reconnaissance / known_enemy_composition (Candidate E, E1)
+# ---------------------------------------------------------------------------
+
+def _nonforest_cell(grid):
+    return next(
+        c for c in (grid.get(x, y) for x in range(grid.width) for y in range(grid.height))
+        if c and c.terrain != TerrainType.FOREST
+    )
+
+
+def _make_recon_loop(weather, enemy_cells, enemy_types=None):
+    """Minimal BattleLoop with enemy (player) units placed on specific cells,
+    to directly control the occlusion_fraction term of the reconnaissance
+    formula. Uses the same grid seed as the rest of this file for determinism."""
+    grid = Grid(seed=42)
+    general_units = [make_unit(UnitType.CAVALRY, "general", (20, 75))]
+    enemy_types = enemy_types or [UnitType.INFANTRY] * len(enemy_cells)
+    player_units = [
+        make_unit(t, "player", (c.x, c.y))
+        for t, c in zip(enemy_types, enemy_cells)
+    ]
+    loop = BattleLoop(grid=grid, general_units=general_units,
+                       player_units=player_units, seed=42)
+    loop.state.battlefield_features = loop.grid.battlefield_features()
+    loop.turn = 1
+    loop.weather = weather
+    return loop, grid
+
+
+def test_known_enemy_composition_populated_in_clear_open_conditions():
+    """Clear weather, 0 forest units: confidence = 0.6 -> fires."""
+    grid = Grid(seed=42)
+    loop, _ = _make_recon_loop("clear", [_nonforest_cell(grid)])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition is not None
+    assert snap.known_enemy_composition["confidence"] == 0.6
+    assert "cavalry" in snap.known_enemy_composition
+    assert "siege"   in snap.known_enemy_composition
+
+
+def test_known_enemy_composition_none_when_blizzard_and_no_forest():
+    """Blizzard, 0 forest units: confidence = 0.1 -> below RECON_THRESHOLD,
+    stays None."""
+    grid = Grid(seed=42)
+    loop, _ = _make_recon_loop("blizzard", [_nonforest_cell(grid)])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition is None
+
+
+def test_known_enemy_composition_none_when_all_units_in_forest_clear_weather():
+    """Clear weather, all units in forest: confidence = 0.6 - 0.4 = 0.2 ->
+    below RECON_THRESHOLD, stays None."""
+    grid = Grid(seed=42)
+    forest = grid.cells_of_type(TerrainType.FOREST)[0]
+    loop, _ = _make_recon_loop("clear", [forest, forest])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition is None
+
+
+def test_known_enemy_composition_confidence_gated_not_always_on():
+    """Same seed/grid, different occlusion: half the enemy force in forest
+    fires (confidence 0.4); all of it in forest does not (confidence 0.2).
+    Proves the field is confidence-gated, not always-on."""
+    grid = Grid(seed=42)
+    forest    = grid.cells_of_type(TerrainType.FOREST)[0]
+    nonforest = _nonforest_cell(grid)
+
+    loop_half, _ = _make_recon_loop(
+        "clear", [forest, nonforest], [UnitType.CAVALRY, UnitType.INFANTRY]
+    )
+    snap_half = loop_half.to_brain_snapshot("srv_1", "player_A")
+    assert snap_half.known_enemy_composition is not None
+    assert snap_half.known_enemy_composition["confidence"] == 0.4
+
+    loop_all_forest, _ = _make_recon_loop("clear", [forest, forest])
+    snap_all_forest = loop_all_forest.to_brain_snapshot("srv_1", "player_A")
+    assert snap_all_forest.known_enemy_composition is None
+
+
+def test_known_enemy_composition_reflects_alive_enemy_unit_types():
+    grid = Grid(seed=42)
+    loop, _ = _make_recon_loop("clear", [_nonforest_cell(grid)], [UnitType.CAVALRY])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition["cavalry"] is True
+    assert snap.known_enemy_composition["siege"]   is False
+
+
+def test_existing_snapshot_behavior_unaffected_by_known_enemy_composition():
+    """Baseline regression check: a standard make_battle() snapshot still
+    produces a valid CommanderKnowledge with the field present and typed
+    correctly (None or dict) — existing snapshot behavior is untouched."""
+    loop = make_battle()
+    loop.state.battlefield_features = loop.grid.battlefield_features()
+    loop.turn = 1
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition is None or isinstance(
+        snap.known_enemy_composition, dict
+    )
 
 
 if __name__ == "__main__":
