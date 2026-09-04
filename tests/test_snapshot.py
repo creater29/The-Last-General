@@ -151,6 +151,30 @@ def test_visible_terrain_defaults_to_empty_list():
     assert k.visible_terrain == []
 
 
+def test_known_enemy_composition_defaults_to_none():
+    """E1: existing callers (keyword-only, no known_enemy_composition arg)
+    must be unaffected — this is the direct backward-compatibility contract
+    E1 relies on (verified against all 3 real call sites, not assumed)."""
+    k = make_knowledge()
+    assert k.known_enemy_composition is None
+
+
+def test_known_enemy_composition_accepts_documented_shape():
+    """E1: the field accepts the documented composition dict unchanged —
+    {"cavalry": bool, "siege": bool, "confidence": float}."""
+    k = CommanderKnowledge(
+        server_id="s", player_id="p", turn=1, weather="clear",
+        battlefield_features={}, known_enemy_presence={},
+        known_friendly_state={},
+        known_enemy_composition={
+            "cavalry": True, "siege": False, "confidence": 0.6,
+        },
+    )
+    assert k.known_enemy_composition == {
+        "cavalry": True, "siege": False, "confidence": 0.6,
+    }
+
+
 # ---------------------------------------------------------------------------
 # to_brain_snapshot() on BattleLoop
 # ---------------------------------------------------------------------------

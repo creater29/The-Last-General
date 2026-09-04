@@ -37,7 +37,7 @@ Future extensions (Stage 3+):
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -63,6 +63,11 @@ class CommanderKnowledge:
                                 e.g. ["frozen_lake", "river", "forest"]
         visible_events        — terrain events observed so far this battle
                                 e.g. [{"event_type": "ice_break", ...}]
+        known_enemy_composition — (E1) imperfect, confidence-gated read on enemy
+                                unit-type presence via reconnaissance:
+                                {"cavalry": bool, "siege": bool, "confidence": float}
+                                None means no observation was made this turn —
+                                not "composition is empty/absent."
     """
     server_id:             str
     player_id:             str
@@ -73,3 +78,4 @@ class CommanderKnowledge:
     known_friendly_state:  dict
     visible_terrain:       List[str] = field(default_factory=list)
     visible_events:        List[dict] = field(default_factory=list)
+    known_enemy_composition: Optional[dict] = field(default=None)
