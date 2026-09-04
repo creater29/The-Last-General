@@ -6,7 +6,10 @@
 #
 # Test:
 #   python3 -m pytest tests/ --tb=short -q
-# Expected: 402 passed
+# Expected count changes as work progresses — check state/PROGRESS.md for
+# the current figure rather than trusting this comment, which goes stale
+# on every commit that adds tests. Last known-correct at commit time:
+# 413 passed (Candidate E E1 Step 2, in progress).
 
 pytest==9.0.2
 pytest-cov==7.1.0
