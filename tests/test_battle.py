@@ -8,7 +8,9 @@ from simulator.grid import Grid, TerrainType
 from simulator.units import UnitType, make_unit, make_group
 from simulator.battle import (
     BattleLoop, BattleState, TurnRecord,
-    GeneralIntent, PlayerIntent
+    GeneralIntent, PlayerIntent,
+    RECON_BASE_CONFIDENCE, RECON_THRESHOLD,
+    RECON_WEATHER_PENALTY, RECON_OCCLUSION_SCALE,
 )
 
 
@@ -322,33 +324,73 @@ def _make_recon_loop(weather, enemy_cells, enemy_types=None):
 
 
 def test_known_enemy_composition_populated_in_clear_open_conditions():
-    """Clear weather, 0 forest units: confidence = 0.6 -> fires."""
+    """Clear weather, 0 forest units: confidence = RECON_BASE_CONFIDENCE
+    (0.6) -> fires."""
     grid = Grid(seed=42)
     loop, _ = _make_recon_loop("clear", [_nonforest_cell(grid)])
     snap = loop.to_brain_snapshot("srv_1", "player_A")
     assert snap.known_enemy_composition is not None
-    assert snap.known_enemy_composition["confidence"] == 0.6
+    assert snap.known_enemy_composition["confidence"] == RECON_BASE_CONFIDENCE
     assert "cavalry" in snap.known_enemy_composition
     assert "siege"   in snap.known_enemy_composition
 
 
+def test_known_enemy_composition_populated_in_fog_open_conditions():
+    """Fog, 0 forest units: confidence = RECON_BASE_CONFIDENCE +
+    RECON_WEATHER_PENALTY['fog'] = 0.3 -> still fires (minimal but present
+    confidence). Required worked example from the E1 spec — distinct from
+    the blizzard case, which is the same shape but falls below threshold."""
+    grid = Grid(seed=42)
+    loop, _ = _make_recon_loop("fog", [_nonforest_cell(grid)])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    expected = RECON_BASE_CONFIDENCE + RECON_WEATHER_PENALTY["fog"]
+    assert snap.known_enemy_composition is not None
+    assert snap.known_enemy_composition["confidence"] == expected
+
+
 def test_known_enemy_composition_none_when_blizzard_and_no_forest():
-    """Blizzard, 0 forest units: confidence = 0.1 -> below RECON_THRESHOLD,
+    """Blizzard, 0 forest units: confidence = RECON_BASE_CONFIDENCE +
+    RECON_WEATHER_PENALTY['blizzard'] = 0.1 -> below RECON_THRESHOLD,
     stays None."""
     grid = Grid(seed=42)
     loop, _ = _make_recon_loop("blizzard", [_nonforest_cell(grid)])
     snap = loop.to_brain_snapshot("srv_1", "player_A")
+    expected = RECON_BASE_CONFIDENCE + RECON_WEATHER_PENALTY["blizzard"]
+    assert expected < RECON_THRESHOLD  # sanity-check the scenario itself
     assert snap.known_enemy_composition is None
 
 
 def test_known_enemy_composition_none_when_all_units_in_forest_clear_weather():
-    """Clear weather, all units in forest: confidence = 0.6 - 0.4 = 0.2 ->
-    below RECON_THRESHOLD, stays None."""
+    """Clear weather, all units in forest: confidence = RECON_BASE_CONFIDENCE
+    - RECON_OCCLUSION_SCALE = 0.2 -> below RECON_THRESHOLD, stays None."""
     grid = Grid(seed=42)
     forest = grid.cells_of_type(TerrainType.FOREST)[0]
     loop, _ = _make_recon_loop("clear", [forest, forest])
     snap = loop.to_brain_snapshot("srv_1", "player_A")
+    expected = RECON_BASE_CONFIDENCE - RECON_OCCLUSION_SCALE
+    assert expected < RECON_THRESHOLD  # sanity-check the scenario itself
     assert snap.known_enemy_composition is None
+
+
+def test_known_enemy_composition_fires_exactly_at_threshold():
+    """Proves the comparison is `confidence >= RECON_THRESHOLD`, not a
+    stricter `>` — the exact boundary case, not an approximation.
+    7 of 8 enemy units in forest (occlusion_fraction = 0.875), clear
+    weather: confidence = RECON_BASE_CONFIDENCE
+    - RECON_OCCLUSION_SCALE * 0.875 = 0.25 = RECON_THRESHOLD exactly."""
+    grid = Grid(seed=42)
+    forest    = grid.cells_of_type(TerrainType.FOREST)[0]
+    nonforest = _nonforest_cell(grid)
+    occlusion_fraction = 7 / 8
+    expected = round(
+        RECON_BASE_CONFIDENCE - RECON_OCCLUSION_SCALE * occlusion_fraction, 3
+    )
+    assert expected == RECON_THRESHOLD  # sanity-check the scenario itself
+
+    loop, _ = _make_recon_loop("clear", [forest] * 7 + [nonforest])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition is not None
+    assert snap.known_enemy_composition["confidence"] == RECON_THRESHOLD
 
 
 def test_known_enemy_composition_confidence_gated_not_always_on():
@@ -363,20 +405,32 @@ def test_known_enemy_composition_confidence_gated_not_always_on():
         "clear", [forest, nonforest], [UnitType.CAVALRY, UnitType.INFANTRY]
     )
     snap_half = loop_half.to_brain_snapshot("srv_1", "player_A")
+    expected_half = round(RECON_BASE_CONFIDENCE - RECON_OCCLUSION_SCALE * 0.5, 3)
     assert snap_half.known_enemy_composition is not None
-    assert snap_half.known_enemy_composition["confidence"] == 0.4
+    assert snap_half.known_enemy_composition["confidence"] == expected_half
 
     loop_all_forest, _ = _make_recon_loop("clear", [forest, forest])
     snap_all_forest = loop_all_forest.to_brain_snapshot("srv_1", "player_A")
     assert snap_all_forest.known_enemy_composition is None
 
 
-def test_known_enemy_composition_reflects_alive_enemy_unit_types():
+def test_known_enemy_composition_reflects_alive_enemy_cavalry():
     grid = Grid(seed=42)
     loop, _ = _make_recon_loop("clear", [_nonforest_cell(grid)], [UnitType.CAVALRY])
     snap = loop.to_brain_snapshot("srv_1", "player_A")
     assert snap.known_enemy_composition["cavalry"] is True
     assert snap.known_enemy_composition["siege"]   is False
+
+
+def test_known_enemy_composition_reflects_alive_enemy_siege():
+    """Positive siege case — the cavalry case above was the only unit-type
+    coverage before this; siege needs its own direct assertion since it's
+    a distinct boolean read from the same alive_enemy list."""
+    grid = Grid(seed=42)
+    loop, _ = _make_recon_loop("clear", [_nonforest_cell(grid)], [UnitType.SIEGE])
+    snap = loop.to_brain_snapshot("srv_1", "player_A")
+    assert snap.known_enemy_composition["siege"]   is True
+    assert snap.known_enemy_composition["cavalry"] is False
 
 
 def test_existing_snapshot_behavior_unaffected_by_known_enemy_composition():
