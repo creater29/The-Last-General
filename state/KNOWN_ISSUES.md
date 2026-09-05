@@ -155,3 +155,23 @@ Relational memory (trust level, betrayal count, cooperation history)
 is tracked nowhere.
 **Mitigation planned:** Build as Stage 3 component after integration test.
 **When to address:** Stage 3 Candidate C.
+
+### W010 — Hardcoded absolute import path in test files (logged 2026-09-04, Candidate E E1 Step 2 review)
+**Component:** tests/test_battle.py (confirmed), likely other test files —
+not yet audited comprehensively.
+**Description:** `sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`
+hardcodes an absolute path rather than deriving it from `__file__`. This
+contradicts the reproducibility claim made by `requirements.txt` +
+`pyproject.toml` (added during Candidate E's supervisor review process) —
+a fresh clone on another machine, another user account, or Linux would
+fail this line even with dependencies correctly installed. Predates
+Candidate E; discovered while extending `test_battle.py` for E1 Step 2,
+flagged by supervisor review as out of scope for that step.
+**Fix (not done — logged only, per Candidate Discipline):** Audit all test
+files for this pattern; replace with a path derived from `__file__`
+(e.g. `Path(__file__).resolve().parents[1] / "src"`) or a `conftest.py`
+fixture/`pytest.ini` `pythonpath` setting so no individual test file needs
+its own `sys.path` manipulation at all.
+**When to address:** Dedicated consolidation-audit pass across all test
+files — not mid-candidate, to avoid scope creep into unrelated test
+infrastructure while E1 Step 3 is in progress.

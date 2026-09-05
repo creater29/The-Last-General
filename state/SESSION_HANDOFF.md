@@ -1,9 +1,74 @@
 # Session Handoff
 
-## Date: 2026-06-28
-## Stage: 3 (Live Pipeline)
-## Tests: 402/402
-## Handoff to: next session
+## Date: 2026-09-04
+## Stage: 3 (Live Pipeline) — Candidate E E1, Steps 1-2 of 3 complete
+## Tests: 413/413
+## Handoff to: next session (Step 3 — decision_engine.py)
+
+---
+
+## Session 2026-09-04 — Candidate E E1 Steps 1-2 implemented (Step 3 remains)
+
+Implemented the first two of three E1 file changes, per the already-approved
+E1 Implementation Plan (ARCHITECTURE.md) — no new architectural decisions
+made this session, routine implementation of a pre-reviewed spec, matching
+the "state plan, wait for confirmation, implement" discipline used for every
+phase of Candidate D. Full detail in PROGRESS.md's Candidate E section
+(now updated — the "AUDIT + DESIGN COMPLETE — implementation not yet
+started" framing below is superseded).
+
+**Step 1 (`snapshot.py`) — complete.** Added `known_enemy_composition:
+Optional[dict] = None`. 402 → 404 tests. Commit `85176cf`.
+
+**Step 2 (`battle.py`) — complete, after one supervisor review round.**
+Added `RECON_*` module-level constants and the reconnaissance confidence
+computation inside `to_brain_snapshot()`. Initial pass: 404 → 410 tests
+(commit `4c5d71e`). Supervisor review found the implementation sound but
+test coverage incomplete in four specific ways — missing fog worked
+example, untested threshold boundary (`>=` vs `>`), cavalry-only unit-type
+coverage, hardcoded literals instead of imported constants. All four
+addressed: 410 → 413 tests (commit `ea26310`). Also fixed a stale
+"Expected: 402 passed" comment in `requirements.txt` that would have
+misled the exact reproducibility check the reviewer was asking for
+(commit `2525658`).
+
+**All five worked examples from the E1 spec were verified numerically
+against the live implementation via a throwaway script before being
+written as tests** — not derived from the formula on paper and assumed
+correct. This caught nothing wrong in the implementation itself, but the
+test-writing pass afterward did introduce two floating-point rounding
+mismatches (test expected values not rounded the way the implementation
+rounds), caught by actually running the suite before claiming done, not
+assumed from the math.
+
+**Verified this session, not assumed:**
+- 413/413 full suite passing (re-run after every edit, not just at the end)
+- `run_integration_test.py`: 9/9 existing criteria PASS, 0 pipeline errors,
+  live production DB confirmed, after both Step 1 and Step 2 individually
+- `known_enemy_composition` is computed on every turn but not yet consumed
+  anywhere in `decision_engine.py` — confirmed this is the correct
+  intermediate state (Step 3 is the consumer), not a gap
+
+**Logged, not fixed (per supervisor review — explicitly out of E1 scope):**
+`test_battle.py` (among other test files) uses a hardcoded absolute import
+path (`sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`)
+rather than one derived from `__file__`. This predates E1, is unrelated to
+Candidate E, and fixing it would be scope creep into unrelated test
+infrastructure per the Candidate Discipline rule. Tracked as W010 in
+KNOWN_ISSUES.md for a future consolidation audit.
+
+**Next: Step 3 — `decision_engine.py`.** Read the file fresh (signatures of
+the four existing factor functions, the real `INTENT_TERRAIN_RELEVANCE`
+mapping, `DEFENSIVE_HOLD`'s actual classification — verify against live
+code, not the line numbers cited in ARCHITECTURE.md, which may have
+drifted) before writing anything. Add `COMP_SIEGE_PENALTY`,
+`COMP_CAVALRY_BOOST`, `COMP_CAVALRY_EXPLOIT` module-level constants, add
+`_composition_factor(intent, knowledge)` matching the existing four-factor
+pattern exactly, wire into `decide()` after `_relationship_factor()`, add
+`composition_used: bool` to the return dict. Do NOT modify
+`_doctrine_factor()`. This closes E1 implementation — integration success
+criteria 10-11 remain outstanding until this step adds the corresponding
+`run_integration_test.py` checks.
 
 ---
 
@@ -40,6 +105,47 @@ All three rounds produced real corrections. The specification is now:
 
 ## ⚠️ NEW CHAT HANDOFF PROMPT (copy-paste this exactly)
 
+**Superseded 2026-09-04 — Steps 1-2 are now complete.** The prompt below is
+kept as a historical record of how this session was bootstrapped (its
+"402/402" and "three source files" framing describe the state at session
+start, not now). Use this replacement prompt for the next session instead:
+
+```
+I'm continuing development of "The Last General's Mind" project.
+You have full terminal access to my local machine via Desktop Commander MCP.
+
+Before doing anything else, run this verification:
+
+    cd ~/Projects/general_brain && python3 -m pytest tests/ --tb=short -q
+
+Then read these files in this exact order — fully, no skimming:
+1. state/CLAUDE_BRIEFING.md
+2. state/ARCHITECTURE.md
+3. state/PROGRESS.md
+4. state/KNOWN_ISSUES.md
+5. state/SESSION_HANDOFF.md
+6. state/DEFERRED_ITEMS.md
+
+Once you have read all six files and confirmed 413/413 tests pass, tell me:
+
+1. What Steps 1 and 2 of Candidate E E1 already did (one sentence each),
+   and which two files they touched
+2. What Step 3 (decision_engine.py) is trying to achieve
+3. What _composition_factor()'s exact signature is, matching which existing
+   pattern, and what it returns for known_enemy_composition=None
+4. What COMP_SIEGE_PENALTY, COMP_CAVALRY_BOOST, and COMP_CAVALRY_EXPLOIT
+   apply to (which intents, under what composition + confidence conditions)
+5. What decision_engine.py's actual INTENT_TERRAIN_RELEVANCE mapping and
+   DEFENSIVE_HOLD's classification are — verified by reading the live file,
+   not by trusting the line numbers cited in ARCHITECTURE.md
+6. What tests remain to be written for Step 3, and what the 10th/11th
+   integration success criteria are
+
+Do not start writing any code until I confirm your understanding is correct.
+```
+
+Original bootstrap prompt for this session, kept for the record:
+
 ```
 I'm continuing development of "The Last General's Mind" project.
 You have full terminal access to my local machine via Desktop Commander MCP.
@@ -75,66 +181,64 @@ Do not start writing any code until I confirm your understanding is correct.
 
 ## Current state for implementation
 
-All architecture is complete and approved. Implementation begins with
-`snapshot.py` — the lowest-risk, most isolated change. The SESSION_HANDOFF
-"NEXT WORK" section below has the full step-by-step plan. Read it fully
-before starting Step 1.
+Steps 1 and 2 of 3 are complete and committed (`85176cf`, `4c5d71e`,
+`ea26310`, `2525658`). Only Step 3 (`src/brain/decision_engine.py`)
+remains to close E1. The "NEXT WORK" section below has the full Step 3
+plan — still accurate and unchanged from the original approved E1
+Implementation Plan; only its Step 1/Step 2 sub-sections are now marked
+complete rather than pending.
 
 Key facts the new instance must not assume (verified in this session):
-- All three direct `CommanderKnowledge` callers use keyword arguments
-  exclusively → adding `known_enemy_composition: Optional[dict] = None`
-  with `field(default=None)` requires zero changes to any existing caller
-- `RECON_*` constants must be MODULE-LEVEL in `battle.py`, not local to
-  `to_brain_snapshot()`, because tests must be able to import them
+- All three direct `CommanderKnowledge` callers used keyword arguments
+  exclusively → Step 1 required zero changes to any existing caller
+  (confirmed, not assumed — now moot, Step 1 is done)
+- `RECON_*` constants are confirmed MODULE-LEVEL in `battle.py` (done)
 - `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`
   — takes intent first, exactly matching all four existing factor functions
-- `known_enemy_composition = None` → `_composition_factor()` returns `(1.0, [])`
-  for every intent — identical to today's behavior
+  — this is still the Step 3 target signature, not yet implemented
+- `known_enemy_composition = None` → `_composition_factor()` must return
+  `(1.0, [])` for every intent — identical to today's behavior — not yet
+  implemented, this is Step 3's job
 
 ---
 
-## NEXT WORK: Candidate E — E1 Implementation (NOT YET STARTED)
+## NEXT WORK: Candidate E — E1 Step 3 only (Steps 1-2 COMPLETE)
 
 Full architecture sequence complete (Audit → Perception Architecture →
 E001 → E1 Technical Specification → E1 Implementation Plan), all
-permanent in ARCHITECTURE.md. Implementation has not started.
+permanent in ARCHITECTURE.md. Steps 1-2 of implementation are complete
+and committed; Step 3 has not started.
 
-The next session's first task is to CONFIRM the implementation plan, then
-implement. Per standing project discipline: read the relevant files fresh,
-state the implementation plan explicitly, wait for confirmation, then code.
+The next session's first task is to read `decision_engine.py` fresh (the
+plan below cites specific line numbers from ARCHITECTURE.md that may have
+drifted — verify against the live file, don't trust them), confirm the
+implementation plan, then implement. Per standing project discipline: read
+the relevant files fresh, state the implementation plan explicitly, wait
+for confirmation, then code.
 
 ### What to implement (summary — full detail in ARCHITECTURE.md "E1 Implementation Plan")
 
 Three source files change. Everything else is explicitly untouched.
 
-**Step 1 — `src/simulator/snapshot.py`** (lowest risk, isolated)
-Add one field to `CommanderKnowledge`:
-```python
-known_enemy_composition: Optional[dict] = None
-# When present: {"cavalry": bool, "siege": bool, "confidence": float}
-# When None: no observation this turn
-```
-Compatibility is pre-verified: all 3 direct CommanderKnowledge callers
-(test_snapshot.py:40, test_snapshot.py:146, test_decision_engine.py:108)
-use keyword arguments exclusively — confirmed by direct read, not assumed.
-Adding with `field(default=None)` requires zero changes to any existing caller.
+**Step 1 — `src/simulator/snapshot.py` — COMPLETE ✅ (commit `85176cf`)**
+Added `known_enemy_composition: Optional[dict] = None` to
+`CommanderKnowledge`. Compatibility was pre-verified: all 3 direct
+`CommanderKnowledge` callers used keyword arguments exclusively — confirmed
+by direct read, not assumed. `field(default=None)` required zero changes
+to any existing caller. 402 → 404 tests.
 
-**Step 2 — `src/simulator/battle.py`** (`to_brain_snapshot()` only)
-Add a reconnaissance confidence step inside `to_brain_snapshot()`.
-**Two factors — corrected from earlier plan (supervisor review):**
-1. Weather (fog/blizzard reduce confidence; clear/other are baseline)
-2. Target occlusion — derived from terrain of cells OCCUPIED BY PLAYER
-   UNITS (NOT from `visible_terrain`, which has no spatial relationship
-   to units — confirmed by reading `to_brain_snapshot()` directly).
-   The simulator has `self.player_units` with positions; use each unit's
-   position to look up the terrain cell it currently occupies. Forest-
-   occupied cells reduce confidence. Expose only the resulting confidence
-   number — no coordinates, no unit-level data enters `CommanderKnowledge`.
-Confidence range [0.0, 1.0]. If >= threshold (suggest 0.4, verify at
-implementation time against actual weather/terrain value ranges): populate
-`known_enemy_composition` with live unit-type presence + confidence score.
-If < threshold: leave `None`.
-Read `to_brain_snapshot()` fresh before editing — don't work from memory.
+**Step 2 — `src/simulator/battle.py` (`to_brain_snapshot()` only) — COMPLETE ✅
+(commits `4c5d71e`, `ea26310`, `2525658`)**
+Added the reconnaissance confidence step inside `to_brain_snapshot()`.
+Two factors, both simulator-side: weather (fog/blizzard reduce confidence),
+and target occlusion (derived from terrain of cells occupied by
+`alive_enemy` units — NOT from `visible_terrain`, which has no spatial
+relationship to units). Only the resulting confidence number and
+cavalry/siege booleans cross into `CommanderKnowledge`. `RECON_THRESHOLD =
+0.25`; populates `known_enemy_composition` only when `confidence >=
+RECON_THRESHOLD` (verified this is `>=` not `>` via an exact-boundary
+test), else `None`. 404 → 413 tests across two commits (one supervisor
+review round in between).
 
 **Step 3 — `src/brain/decision_engine.py`**
 Add module-level `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`.
@@ -166,17 +270,20 @@ already established by 4 prior functions, follow it exactly.
 ### Tests to add
 
 Per-file, same discipline as Candidate D phases:
-- `test_snapshot.py`: field defaults to None; populated when reconnaissance
-  fires; remains None when confidence below threshold
+- `test_snapshot.py`: field defaults to None; accepts documented shape —
+  DONE ✅ (commit `85176cf`)
+- `test_battle.py`: to_brain_snapshot() populates known_enemy_composition
+  in appropriate weather/terrain conditions; does NOT always populate it
+  (confidence-gated, not always-on); existing snapshot tests still pass;
+  fog/exact-threshold/siege-positive worked examples; assertions against
+  imported RECON_* constants, not hardcoded literals — DONE ✅ (commits
+  `4c5d71e`, `ea26310`)
 - `test_decision_engine.py`: _composition_factor() with None → 1.0; with
   siege True + high confidence → DEFENSIVE_HOLD penalized; with cavalry
   True + high confidence on forest terrain → TERRAIN_EXPLOIT or AMBUSH
-  boosted; with confidence = 0.0 → 1.0
-- `test_battle.py`: to_brain_snapshot() populates known_enemy_composition
-  in appropriate weather/terrain conditions; does NOT always populate it
-  (confidence-gated, not always-on); existing snapshot tests still pass
+  boosted; with confidence = 0.0 → 1.0 — NOT STARTED (Step 3)
 - `run_integration_test.py`: add 10th and 11th criteria (see ARCHITECTURE.md
-  "E1 integration success criteria")
+  "E1 integration success criteria") — NOT STARTED (Step 3)
 
 ### Audit before writing any code (standing rule)
 

@@ -1,8 +1,8 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
-## Last Updated: 2026-06-28
-## Test Count: 402/402
+## Last Updated: 2026-09-04 (Candidate E E1 Steps 1-2 complete)
+## Test Count: 413/413
 
 ---
 
@@ -498,7 +498,7 @@ reader without this reconciliation).
 reopening it unless new evidence emerges (D023/D024/D025/D026/D027 each
 have explicit, evidence-based re-evaluation triggers — none are timelines).
 
-### Candidate E — Scout Mechanics (Perception Enhancement, Stage E1) [AUDIT + DESIGN COMPLETE — implementation not yet started]
+### Candidate E — Scout Mechanics (Perception Enhancement, Stage E1) [IN PROGRESS 🔄 — Steps 1-2 of 3 complete]
 
 **Prerequisite work done before any implementation, matching D014's rigor:**
 1. Full audit of `battle.py`, `grid.py`, `snapshot.py`, existing hooks —
@@ -546,12 +546,71 @@ quality. Same discipline as D023-D027.
 - No hidden armies, no terrain-based detection yet (that's E2/E3)
 - Explicit non-goal: do not build E2/E3/E4 machinery now
 
-**Not yet done — before implementation can begin:**
-A concrete E1 implementation plan (what fields change, what a "scout"
-concretely is — unit type vs. commander action vs. abstracted capability —
-resolved by what E1 actually needs, not decided in the abstract) — matching
-the "explain the plan, wait for confirmation" discipline used for every
-phase of Candidate D.
+**Step 1 — `snapshot.py` field addition — COMPLETE ✅ (2026-09-04)**
+- `src/simulator/snapshot.py`: added `known_enemy_composition:
+  Optional[dict] = None` as the last field on `CommanderKnowledge`, per the
+  approved E1 Implementation Plan. `field(default=None)` — zero changes
+  required to any existing caller (all 3 direct constructors verified
+  keyword-argument-only before this change, not assumed).
+- `tests/test_snapshot.py`: 2 new tests — field defaults to `None` for
+  existing callers (the direct backward-compatibility contract this step
+  relies on); field accepts the documented `{"cavalry": bool, "siege":
+  bool, "confidence": float}` shape unchanged.
+- Test count: 402 → 404, all passing.
+- Commit: `85176cf`.
+
+**Step 2 — `battle.py` reconnaissance computation — COMPLETE ✅ (2026-09-04)**
+- `src/simulator/battle.py`: added module-level `RECON_BASE_CONFIDENCE`,
+  `RECON_THRESHOLD`, `RECON_WEATHER_PENALTY`, `RECON_OCCLUSION_SCALE`
+  (module-level, not local, so tests can import them directly — required by
+  the approved spec). `to_brain_snapshot()` now computes a deterministic
+  reconnaissance confidence from weather + target occlusion (occlusion
+  derived from the terrain cells `alive_enemy` units currently occupy via
+  `self.grid.get(*u.position)` — simulator-side only; no coordinates cross
+  into `CommanderKnowledge`). Populates `known_enemy_composition` only when
+  `confidence >= RECON_THRESHOLD`; otherwise `None`.
+- `tests/test_battle.py`: 9 new tests total across two passes — the initial
+  6 (clear/open fires, blizzard/no-forest stays None, all-forest stays
+  None, half-forest-vs-all-forest gating proof, cavalry flag, siege flag),
+  plus 3 more added after supervisor review flagged gaps: fog worked
+  example (confidence 0.3, fires — distinct from blizzard, which is the
+  same shape but falls below threshold), an exact-threshold boundary case
+  (`confidence == RECON_THRESHOLD` exactly, proving `>=` not `>`), and a
+  positive siege case (cavalry-only coverage was insufficient). All five
+  worked examples from the E1 spec verified numerically against the live
+  implementation before being written as tests, not derived from the
+  formula on paper.
+- Test count: 404 → 413, all passing.
+- Caught and fixed during the review-response pass: two new test
+  expectations didn't round the way the implementation does
+  (`round(recon_confidence, 3)`), producing floating-point-noise failures
+  (`0.24999999999999994 != 0.25`). Fixed by rounding the test's expected
+  values identically to the implementation — found by actually running
+  the suite, not assumed correct from the math.
+- Integration test: 9/9 existing criteria PASS, 0 pipeline errors, verified
+  live against production DB after each change. `known_enemy_composition`
+  is computed every turn but not yet consumed by `decision_engine.py`
+  (that's Step 3) — this is the expected intermediate state, not a gap.
+- Commits: `4c5d71e` (implementation + initial 6 tests), `ea26310`
+  (3 additional tests per review), `2525658` (stale doc-comment fix in
+  `requirements.txt`, found during the same review response).
+
+**Step 3 — `decision_engine.py` (`_composition_factor()`, wiring,
+`COMP_*` constants, `composition_used` in `decide()`'s return dict) — NOT
+STARTED.** This closes E1 implementation. Integration success criteria
+10-11 (from ARCHITECTURE.md's "E1 integration success criteria") remain
+outstanding until Step 3 wires composition into `decide()`'s scoring loop
+and `scripts/run_integration_test.py` gains the corresponding checks — the
+original 9 integration criteria (Candidates A-C) are unaffected and still
+pass.
+
+**Tracked, not fixed during E1 (logged per supervisor review, 2026-09-04):**
+several test files — including `test_battle.py`, touched during Step 2 —
+use a hardcoded absolute import path
+(`sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`) rather
+than a path derived from `__file__`. This predates E1 and is unrelated to
+Candidate E's scope; fixing it now would be scope creep into unrelated test
+infrastructure. Full detail in KNOWN_ISSUES.md.
 
 ---
 
