@@ -25,8 +25,10 @@ Pipeline (hierarchical, not flat scoring):
     5. Final Ranking — multiplicative scoring, choose highest
 
 Scoring model: score = doctrine_factor × player_factor × situation_factor
-Each factor is in [0.5, 1.5]; neutral = 1.0 when no information available.
-Multiplicative because factors are conditional, not independent.
+              × relationship_factor × composition_factor
+Each factor is in [0.5, 1.5] (composition_factor: [0.75, 1.25]); neutral =
+1.0 when no information available. Multiplicative because factors are
+conditional, not independent.
 
 Import rule (Rule 3 extended):
     from simulator.logger   import EpisodeLogger
@@ -426,6 +428,85 @@ def _relationship_factor(
 
 
 # ---------------------------------------------------------------------------
+# Composition factor (Candidate E, E1)
+# ---------------------------------------------------------------------------
+
+# All values named and testable per the approved E1 Implementation Plan
+# (ARCHITECTURE.md). Fully independent of _doctrine_factor() — composition
+# is its own decision input with its own reasoning trace, not a modifier
+# of doctrine relevance. Do NOT let this function touch doctrines.
+COMP_SIEGE_PENALTY   = 0.25  # DEFENSIVE_HOLD:  1.0 - (COMP_SIEGE_PENALTY * confidence)
+                              # range: [0.75, 1.0]
+COMP_CAVALRY_BOOST   = 0.25  # AMBUSH (+forest): 1.0 + (COMP_CAVALRY_BOOST * confidence)
+                              # range: [1.0, 1.25]
+COMP_CAVALRY_EXPLOIT = 0.20  # TERRAIN_EXPLOIT (+frozen_lake): 1.0 + (COMP_CAVALRY_EXPLOIT * confidence)
+                              # range: [1.0, 1.20]
+
+
+def _composition_factor(
+    intent:    str,
+    knowledge: CommanderKnowledge,
+) -> Tuple[float, List[str]]:
+    """
+    Adjust intent score based on reconnaissance-derived enemy composition
+    (Candidate E, E1). Confidence-scaled, not binary.
+
+    known_enemy_composition is None whenever no reconnaissance observation
+    fired this turn (see battle.py's RECON_THRESHOLD gate) — this is the
+    default for every turn until reconnaissance fires, and is treated
+    identically to a zero-confidence observation: factor = 1.0 for every
+    intent, no reasoning notes.
+
+    Only three intent/composition combinations currently carry a signal —
+    everything else is neutral:
+        siege present   -> DEFENSIVE_HOLD penalised (holding behind walls
+                            against confirmed siege units is a different
+                            risk than holding against infantry)
+        cavalry present + forest on the battlefield      -> AMBUSH boosted
+        cavalry present + frozen_lake on the battlefield -> TERRAIN_EXPLOIT
+                            boosted
+    """
+    if knowledge.known_enemy_composition is None:
+        return 1.0, []
+
+    confidence = knowledge.known_enemy_composition.get("confidence", 0.0)
+    if confidence <= 0.0:
+        return 1.0, []
+
+    siege   = knowledge.known_enemy_composition.get("siege", False)
+    cavalry = knowledge.known_enemy_composition.get("cavalry", False)
+    terrain = knowledge.visible_terrain
+
+    if intent == "DEFENSIVE_HOLD" and siege:
+        factor = round(1.0 - (COMP_SIEGE_PENALTY * confidence), 4)
+        notes = [
+            f"Confirmed enemy siege units (confidence {confidence:.2f}) — "
+            f"holding behind fortifications against siege is riskier than "
+            f"against infantry."
+        ]
+        return factor, notes
+
+    if intent == "AMBUSH" and cavalry and "forest" in terrain:
+        factor = round(1.0 + (COMP_CAVALRY_BOOST * confidence), 4)
+        notes = [
+            f"Confirmed enemy cavalry (confidence {confidence:.2f}) on "
+            f"forest terrain — ambush conditions favourable against cavalry."
+        ]
+        return factor, notes
+
+    if intent == "TERRAIN_EXPLOIT" and cavalry and "frozen_lake" in terrain:
+        factor = round(1.0 + (COMP_CAVALRY_EXPLOIT * confidence), 4)
+        notes = [
+            f"Confirmed enemy cavalry (confidence {confidence:.2f}) on "
+            f"frozen lake terrain — ice-break exploitation favourable "
+            f"against cavalry."
+        ]
+        return factor, notes
+
+    return 1.0, []
+
+
+# ---------------------------------------------------------------------------
 # DecisionEngine
 # ---------------------------------------------------------------------------
 
@@ -472,6 +553,10 @@ class DecisionEngine:
             doctrines_consulted — doctrine ids that influenced the decision
             profile_used        — True if a player profile was available
             relationship_used   — True if a relationship record was available
+            composition_used    — True if known_enemy_composition was
+                                   present with confidence > 0 (Candidate E,
+                                   E1). Always present on every return path,
+                                   including the fallback response.
         """
         # Load current beliefs, doctrines, and player profile from DB
         doctrines = self._doctrine_extractor.get_doctrines()
@@ -504,9 +589,11 @@ class DecisionEngine:
             if rel_state is not None:
                 r_factor, r_notes = _relationship_factor(intent, rel_state)
 
-            score = round(d_factor * p_factor * s_factor * r_factor, 4)
+            c_factor, c_notes = _composition_factor(intent, knowledge)
+
+            score = round(d_factor * p_factor * s_factor * r_factor * c_factor, 4)
             scores[intent]   = score
-            traces[intent]   = d_notes + p_notes + s_notes + r_notes
+            traces[intent]   = d_notes + p_notes + s_notes + r_notes + c_notes
             doc_refs[intent] = d_ids   # real doctrine IDs from DB
 
         # Step 5 — Rank and select
@@ -534,6 +621,12 @@ class DecisionEngine:
         # Collect doctrine ids that actually influenced the chosen intent
         consulted = doc_refs.get(best_intent, [])
 
+        composition = knowledge.known_enemy_composition
+        composition_used = (
+            composition is not None
+            and composition.get("confidence", 0.0) > 0.0
+        )
+
         return {
             "intent":               best_intent,
             "confidence":           confidence,
@@ -545,6 +638,7 @@ class DecisionEngine:
             "doctrines_consulted":  consulted,
             "profile_used":         bool(profile),
             "relationship_used":    rel_state is not None and rel_state.encounters > 0,
+            "composition_used":     composition_used,
         }
 
     def choose_intent(self, knowledge: CommanderKnowledge) -> str:
@@ -599,4 +693,5 @@ class DecisionEngine:
             "alternatives":         [],
             "doctrines_consulted":  [],
             "profile_used":         profile_used,
+            "composition_used":     False,
         }

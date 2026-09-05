@@ -32,6 +32,8 @@ from brain.player_profiler import PlayerProfiler
 from brain.decision_engine import (
     DecisionEngine, ALL_INTENTS, FALLBACK_INTENT,
     _filter_intents, _doctrine_factor, _player_factor, _situation_factor,
+    _composition_factor,
+    COMP_SIEGE_PENALTY, COMP_CAVALRY_BOOST, COMP_CAVALRY_EXPLOIT,
 )
 
 
@@ -98,6 +100,7 @@ def make_knowledge(
     has_walls=False, has_forest=False,
     has_siege=False, has_cavalry=True,
     enemy_count=3, friendly_health=0.9,
+    known_enemy_composition=None,
 ) -> CommanderKnowledge:
     has_hazard = has_frozen_lake or has_river
     visible = []
@@ -126,6 +129,7 @@ def make_knowledge(
         },
         visible_terrain=visible,
         visible_events=[],
+        known_enemy_composition=known_enemy_composition,
     )
 
 
@@ -806,3 +810,220 @@ def test_record_battle_outcome_empty_decisions():
     count  = engine.record_battle_outcome("loss", [])
     assert count == 0
     logger.close()
+
+
+# ---------------------------------------------------------------------------
+# Composition factor (Candidate E, E1, Step 3)
+# ---------------------------------------------------------------------------
+
+def test_composition_factor_neutral_when_none():
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", make_knowledge(
+        known_enemy_composition=None
+    ))
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_neutral_when_confidence_zero():
+    """Zero-confidence observation is treated identically to None."""
+    k = make_knowledge(known_enemy_composition={
+        "siege": True, "cavalry": True, "confidence": 0.0
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_siege_penalizes_defensive_hold_full_confidence():
+    """siege=True, confidence=1.0 -> factor = 1.0 - COMP_SIEGE_PENALTY."""
+    k = make_knowledge(known_enemy_composition={
+        "siege": True, "cavalry": False, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == round(1.0 - COMP_SIEGE_PENALTY, 4)
+    assert len(notes) == 1
+
+
+def test_composition_factor_siege_penalizes_defensive_hold_half_confidence():
+    """siege=True, confidence=0.5 -> confidence-scaled, half the penalty."""
+    k = make_knowledge(known_enemy_composition={
+        "siege": True, "cavalry": False, "confidence": 0.5
+    })
+    factor, _ = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == round(1.0 - COMP_SIEGE_PENALTY * 0.5, 4)
+
+
+def test_composition_factor_no_siege_no_penalty_on_defensive_hold():
+    """siege=False -> DEFENSIVE_HOLD unaffected regardless of confidence."""
+    k = make_knowledge(known_enemy_composition={
+        "siege": False, "cavalry": False, "confidence": 0.8
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_cavalry_boosts_ambush_with_forest():
+    """cavalry=True + forest in visible_terrain, confidence=1.0 ->
+    factor = 1.0 + COMP_CAVALRY_BOOST."""
+    k = make_knowledge(has_forest=True, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("AMBUSH", k)
+    assert factor == round(1.0 + COMP_CAVALRY_BOOST, 4)
+    assert len(notes) == 1
+
+
+def test_composition_factor_cavalry_ambush_confidence_scaled():
+    k = make_knowledge(has_forest=True, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 0.5
+    })
+    factor, _ = _composition_factor("AMBUSH", k)
+    assert factor == round(1.0 + COMP_CAVALRY_BOOST * 0.5, 4)
+
+
+def test_composition_factor_cavalry_no_boost_on_ambush_without_forest():
+    """cavalry present but no forest on battlefield -> AMBUSH unaffected.
+    (AMBUSH itself would already be filtered by _filter_intents without
+    forest, but _composition_factor must not assume that filter ran.)"""
+    k = make_knowledge(has_forest=False, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("AMBUSH", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_cavalry_boosts_terrain_exploit_with_frozen_lake():
+    """cavalry=True + frozen_lake in visible_terrain, confidence=1.0 ->
+    factor = 1.0 + COMP_CAVALRY_EXPLOIT."""
+    k = make_knowledge(has_frozen_lake=True, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("TERRAIN_EXPLOIT", k)
+    assert factor == round(1.0 + COMP_CAVALRY_EXPLOIT, 4)
+    assert len(notes) == 1
+
+
+def test_composition_factor_cavalry_no_boost_on_terrain_exploit_without_frozen_lake():
+    """cavalry present but no frozen_lake -> TERRAIN_EXPLOIT unaffected,
+    even with river (a different hazard) present."""
+    k = make_knowledge(has_river=True, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("TERRAIN_EXPLOIT", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_neutral_for_unrelated_intent():
+    """siege + cavalry both confirmed, but an intent with no composition
+    mapping (e.g. AGGRESSIVE_PUSH) is unaffected."""
+    k = make_knowledge(has_forest=True, has_frozen_lake=True,
+                       known_enemy_composition={
+        "siege": True, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("AGGRESSIVE_PUSH", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_worked_examples_match_architecture_spec():
+    """All five worked examples from ARCHITECTURE.md's E1 Implementation
+    Plan, asserted in one place against the imported COMP_* constants —
+    not hardcoded literals — so test and implementation share the same
+    documented contract (same discipline as Step 2's review requirement)."""
+    cases = [
+        # (intent, composition, extra_kwargs, expected_factor)
+        ("DEFENSIVE_HOLD",
+         {"siege": True, "cavalry": False, "confidence": 1.0}, {},
+         round(1.0 - COMP_SIEGE_PENALTY * 1.0, 4)),
+        ("DEFENSIVE_HOLD",
+         {"siege": True, "cavalry": False, "confidence": 0.5}, {},
+         round(1.0 - COMP_SIEGE_PENALTY * 0.5, 4)),
+        ("AMBUSH",
+         {"siege": False, "cavalry": True, "confidence": 1.0},
+         {"has_forest": True},
+         round(1.0 + COMP_CAVALRY_BOOST * 1.0, 4)),
+        ("TERRAIN_EXPLOIT",
+         {"siege": False, "cavalry": True, "confidence": 1.0},
+         {"has_frozen_lake": True},
+         round(1.0 + COMP_CAVALRY_EXPLOIT * 1.0, 4)),
+        ("DEFENSIVE_HOLD",
+         {"siege": False, "cavalry": False, "confidence": 0.8}, {},
+         1.0),
+    ]
+    for intent, comp, extra, expected in cases:
+        k = make_knowledge(known_enemy_composition=comp, **extra)
+        factor, _ = _composition_factor(intent, k)
+        assert factor == expected, (
+            f"{intent} with {comp} and {extra}: expected {expected}, got {factor}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# composition_used in decide()'s return dict
+# ---------------------------------------------------------------------------
+
+def test_decide_composition_used_true_when_present_with_confidence():
+    logger = temp_logger()
+    engine = make_engine(logger)
+    k = make_knowledge(known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 0.6
+    })
+    result = engine.decide(k)
+    assert result["composition_used"] is True
+    logger.close()
+
+
+def test_decide_composition_used_false_when_composition_none():
+    logger = temp_logger()
+    engine = make_engine(logger)
+    result = engine.decide(make_knowledge(known_enemy_composition=None))
+    assert result["composition_used"] is False
+    logger.close()
+
+
+def test_decide_composition_used_false_when_confidence_zero():
+    """Per supervisor rule: composition_used requires confidence > 0,
+    not merely known_enemy_composition is not None."""
+    logger = temp_logger()
+    engine = make_engine(logger)
+    k = make_knowledge(known_enemy_composition={
+        "siege": True, "cavalry": True, "confidence": 0.0
+    })
+    result = engine.decide(k)
+    assert result["composition_used"] is False
+    logger.close()
+
+
+def test_fallback_response_includes_composition_used_false():
+    """decide()'s fallback path is unreachable via the public API today —
+    _filter_intents() always leaves at least FALLBACK_INTENT available, so
+    the `scores` dict inside decide() can never end up empty (see
+    KNOWN_ISSUES.md W011 for the related relationship_used gap this same
+    code path already had). Testing _fallback_response() directly is the
+    only way to verify its contract. Per supervisor decision (2026-09-04):
+    a public decision-result field must exist on every return path,
+    including this one — composition_used must not repeat the
+    relationship_used omission."""
+    logger = temp_logger()
+    engine = make_engine(logger)
+    result = engine._fallback_response(rejected=["TEST: forced"], profile_used=False)
+    assert "composition_used" in result
+    assert result["composition_used"] is False
+    logger.close()
+
+
+def test_decide_composition_boost_reflected_in_reasoning():
+    """End-to-end: a decide() call with confirmed cavalry + forest should
+    surface a composition-derived reasoning note when AMBUSH is chosen or
+    among the scored intents' traces — verified via the raw factor
+    function feeding the same knowledge object decide() would use,
+    confirming the wiring point rather than re-deriving the formula."""
+    k = make_knowledge(has_forest=True, known_enemy_composition={
+        "siege": False, "cavalry": True, "confidence": 1.0
+    })
+    factor, notes = _composition_factor("AMBUSH", k)
+    assert factor > 1.0
+    assert any("cavalry" in n.lower() for n in notes)

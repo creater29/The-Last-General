@@ -21,6 +21,12 @@ Success criteria (must ALL pass):
     [5] Decision trace complete on all turns (reasoning field present)
     [6] Pipeline completed with 0 errors
     [7] Post-battle analysis pipeline executed successfully
+    [8] Feedback loop verified (doctrine failure_count incremented on loss)
+    [9] Relationship record updated after battle
+    [10] known_enemy_composition non-None on at least some turns (Candidate E
+         E1 — proves the Observation Producer fires in real battle
+         conditions; exact composition-scoring behavior is covered
+         deterministically in test_decision_engine.py, not here)
 """
 
 from __future__ import annotations
@@ -175,12 +181,13 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     total_doctrines_consulted = 0
     profiles_used_count       = 0
     relationship_used_count   = 0
+    composition_observed_count = 0
 
     # -------------------------------------------------------------------
     # Step 6 — brain_intent_fn: the integration bridge
     # -------------------------------------------------------------------
     def brain_intent_fn(state):
-        nonlocal total_rejected, total_doctrines_consulted, profiles_used_count, relationship_used_count
+        nonlocal total_rejected, total_doctrines_consulted, profiles_used_count, relationship_used_count, composition_observed_count
         try:
             knowledge = loop.to_brain_snapshot(SERVER_ID, PLAYER_ID)
             decision  = engine.decide(knowledge)
@@ -192,6 +199,8 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
                 profiles_used_count += 1
             if decision.get("relationship_used"):
                 relationship_used_count += 1
+            if knowledge.known_enemy_composition is not None:
+                composition_observed_count += 1
 
             # Store full trace
             turn_decisions.append({
@@ -407,6 +416,7 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
         "post_battle_ran":       post_battle_ok,
         "feedback_loop_verified": feedback_ok,
         "relationship_updated":  rel_b1.encounters == rel_before_b1.encounters + 1,
+        "composition_observed":  composition_observed_count > 0,
     }
     all_passed = all(criteria.values())
 
@@ -423,6 +433,7 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
     log(f"  Doctrines consulted:        {total_doctrines_consulted}")
     log(f"  Turns profile was used:     {profiles_used_count}")
     log(f"  Turns relationship used:    {relationship_used_count}")
+    log(f"  Turns composition observed: {composition_observed_count}")
     log(f"  Pipeline errors:            {len(pipeline_errors)}")
     log(f"  Feedback increments:        {increments_applied}")
 
@@ -447,6 +458,11 @@ def run(seed: int = DEFAULT_SEED, verbose: bool = True) -> bool:
         "relationship_updated":  (
             f"Relationship record updated after battle "
             f"(encounters={rel_b1.encounters}, trust={rel_b1.trust_level:.4f})"
+        ),
+        "composition_observed":  (
+            f"known_enemy_composition non-None on at least some turns "
+            f"({composition_observed_count}/{len(turn_decisions)} turns, "
+            f"Candidate E E1)"
         ),
     }
 
