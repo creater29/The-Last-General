@@ -597,12 +597,12 @@ quality. Same discipline as D023-D027.
 
 **Step 3 — `decision_engine.py` (`_composition_factor()`, wiring,
 `COMP_*` constants, `composition_used` in `decide()`'s return dict) — NOT
-STARTED.** This closes E1 implementation. Integration success criteria
-10-11 (from ARCHITECTURE.md's "E1 integration success criteria") remain
-outstanding until Step 3 wires composition into `decide()`'s scoring loop
-and `scripts/run_integration_test.py` gains the corresponding checks — the
-original 9 integration criteria (Candidates A-C) are unaffected and still
-pass.
+STARTED.** This closes E1 implementation. The 10th integration success
+criterion (from ARCHITECTURE.md's "E1 integration success criteria")
+remains outstanding until Step 3 wires composition into `decide()`'s
+scoring loop and `scripts/run_integration_test.py` gains the corresponding
+check — the original 9 integration criteria (Candidates A-C) are
+unaffected and still pass.
 
 **Tracked, not fixed during E1 (logged per supervisor review, 2026-09-04):**
 several test files — including `test_battle.py`, touched during Step 2 —

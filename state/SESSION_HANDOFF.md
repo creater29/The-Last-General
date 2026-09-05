@@ -66,9 +66,9 @@ drifted) before writing anything. Add `COMP_SIEGE_PENALTY`,
 `_composition_factor(intent, knowledge)` matching the existing four-factor
 pattern exactly, wire into `decide()` after `_relationship_factor()`, add
 `composition_used: bool` to the return dict. Do NOT modify
-`_doctrine_factor()`. This closes E1 implementation — integration success
-criteria 10-11 remain outstanding until this step adds the corresponding
-`run_integration_test.py` checks.
+`_doctrine_factor()`. This closes E1 implementation — the 10th integration
+success criterion remains outstanding until this step adds the
+corresponding `run_integration_test.py` check.
 
 ---
 
@@ -138,8 +138,8 @@ Once you have read all six files and confirmed 413/413 tests pass, tell me:
 5. What decision_engine.py's actual INTENT_TERRAIN_RELEVANCE mapping and
    DEFENSIVE_HOLD's classification are — verified by reading the live file,
    not by trusting the line numbers cited in ARCHITECTURE.md
-6. What tests remain to be written for Step 3, and what the 10th/11th
-   integration success criteria are
+6. What tests remain to be written for Step 3, and what the 10th
+   integration success criterion is
 
 Do not start writing any code until I confirm your understanding is correct.
 ```
