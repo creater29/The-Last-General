@@ -175,3 +175,29 @@ its own `sys.path` manipulation at all.
 **When to address:** Dedicated consolidation-audit pass across all test
 files — not mid-candidate, to avoid scope creep into unrelated test
 infrastructure while E1 Step 3 is in progress.
+
+### W011 — decide()'s fallback response is missing documented return-dict keys (logged 2026-09-04, Candidate E E1 Step 3 planning)
+**Component:** src/brain/decision_engine.py (`DecisionEngine._fallback_response()`)
+**Description:** `decide()`'s docstring documents `relationship_used` as
+part of its return contract ("True if a relationship record was
+available"), but `_fallback_response()` — used when situation-filtering
+leaves zero available intents — omits that key entirely. A caller relying
+on the documented contract gets a `KeyError` on the fallback path
+specifically, which is exactly the path most likely to occur when
+knowledge is degraded (the scenario a caller most needs to handle
+gracefully). Predates Candidate E; discovered while reading
+`decision_engine.py` fresh for E1 Step 3, and directly relevant to Step 3
+because the same question (does the fallback path need the new
+`composition_used` key too?) came up for the new field. Resolved for the
+new field only (Step 3 explicitly adds `composition_used: False` to the
+fallback response, per supervisor decision, to avoid repeating this
+exact mistake for a second field) — the pre-existing `relationship_used`
+gap itself is untouched.
+**Fix (not done — logged only, per Candidate Discipline):** Add
+`relationship_used: False` to `_fallback_response()`'s return dict, or
+formally narrow `decide()`'s docstring to state which keys are
+fallback-path-conditional. Either fix is a one-line/one-line-doc change
+but touches a function outside E1's file-by-file contract.
+**When to address:** Alongside W010, in the same consolidation-audit pass,
+or immediately if a caller is ever found relying on `relationship_used`
+being present unconditionally.

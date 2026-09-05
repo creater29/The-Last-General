@@ -732,10 +732,18 @@ breaking callers that were built for an earlier stage.
 1–9: All existing integration criteria from Candidates A-C remain unchanged
 10: `known_enemy_composition` is non-None on at least some turns during
    a live battle (proves the Observation Producer fires in real conditions)
-11: When composition is known with high confidence and the enemy has cavalry,
-   turns with forest or frozen_lake terrain reflect it in `decide()`'s scoring
-   (doctrines for cavalry-dependent terrain events score differently than
-   when `known_enemy_composition is None`)
+
+**Decision (2026-09-04, supervisor review):** exact composition-scoring
+behavior (siege/cavalry + confidence + terrain producing specific factor
+values) belongs in the deterministic `test_decision_engine.py` unit tests,
+which can construct exact `known_enemy_composition` + `visible_terrain`
+combinations. Forcing a live integration battle to happen to produce a
+forest-or-frozen-lake turn with confirmed cavalry would add fragile,
+duplicate coverage of the same formula already proven deterministically —
+integration testing's job here is only to prove the Observation Producer
+fires at all in real conditions (criterion 10), not to re-verify the
+formula's arithmetic. A criterion 11 covering the scoring-effect case was
+considered and rejected for this reason.
 
 ---
 
