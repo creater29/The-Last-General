@@ -37,17 +37,16 @@ from simulator.logger import EpisodeLogger
 # ---------------------------------------------------------------------------
 
 AGGRESSIVE_INTENTS = frozenset({
-    "aggressive_push",
-    "flanking",
+    "attack_center",
+    "attack_flank",
+    "aggressive_rush",
     "siege",
-    "terrain_exploit",
 })
 
 DEFENSIVE_INTENTS = frozenset({
-    "defensive",
+    "defend",
     "retreat",
-    "hold",
-    "ambush",   # ambush is deceptive but not attack; classified defensive
+    "supply_protect",
 })
 
 

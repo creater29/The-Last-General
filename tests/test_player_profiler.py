@@ -31,7 +31,10 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 import pytest
 from simulator.logger import EpisodeLogger
-from brain.player_profiler import PlayerProfiler, AGGRESSIVE_INTENTS, _dominant_intent
+from simulator.battle  import PlayerIntent
+from brain.player_profiler import (
+    PlayerProfiler, AGGRESSIVE_INTENTS, DEFENSIVE_INTENTS, _dominant_intent,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +61,7 @@ def seed_episode(
     """
     timestamp = datetime.now(timezone.utc).isoformat()
     eid = episode_id or f"ep_{uuid.uuid4().hex[:10]}"
-    intents = player_intents or ["aggressive_push"] * 5
+    intents = player_intents or ["aggressive_rush"] * 5
 
     data = {
         "id":              eid,
@@ -260,10 +263,10 @@ def test_profile_from_server_a_not_visible_on_server_b():
 # ---------------------------------------------------------------------------
 
 def test_aggression_index_all_aggressive():
-    """5 aggressive intents → aggression_index = 1.0"""
+    """5 real aggressive PlayerIntent values → aggression_index = 1.0."""
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push"] * 5)
+                 player_intents=["aggressive_rush"] * 5)
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -272,10 +275,10 @@ def test_aggression_index_all_aggressive():
 
 
 def test_aggression_index_all_defensive():
-    """5 defensive intents → aggression_index = 0.0"""
+    """5 real defensive PlayerIntent values → aggression_index = 0.0."""
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["defensive"] * 5)
+                 player_intents=["defend"] * 5)
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -284,10 +287,10 @@ def test_aggression_index_all_defensive():
 
 
 def test_aggression_index_mixed():
-    """4 aggressive + 4 defensive → aggression_index = 0.5"""
+    """4 real aggressive + 4 real defensive → aggression_index = 0.5."""
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push"] * 4 + ["defensive"] * 4)
+                 player_intents=["attack_center"] * 4 + ["defend"] * 4)
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -298,12 +301,59 @@ def test_aggression_index_mixed():
 def test_aggression_index_in_valid_range():
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["flanking", "defensive", "siege", "retreat"])
+                 player_intents=["attack_flank", "defend", "siege", "retreat"])
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
     assert 0.0 <= p["aggression_index"] <= 1.0
     logger.close()
+
+
+# ---------------------------------------------------------------------------
+# Intent classification vocabulary (bugfix regression coverage,
+# Candidate E follow-up, 2026-09-04) — the classifier previously matched
+# GeneralIntent's vocabulary ("aggressive_push", "flanking", "terrain_exploit",
+# "defensive", "hold", "ambush") instead of the real PlayerIntent values
+# episodes actually persist. These tests pin the correct vocabulary and
+# guard against future PlayerIntent additions silently going unclassified.
+# ---------------------------------------------------------------------------
+
+def test_aggressive_intents_contains_no_obsolete_general_intent_labels():
+    """AGGRESSIVE_INTENTS must not contain any GeneralIntent-flavored label
+    that never appears in real player_intents data."""
+    obsolete = {"aggressive_push", "flanking", "terrain_exploit"}
+    assert AGGRESSIVE_INTENTS.isdisjoint(obsolete)
+
+
+def test_defensive_intents_contains_no_obsolete_general_intent_labels():
+    """DEFENSIVE_INTENTS is not currently consumed by the aggression
+    calculation, but it is part of the classifier vocabulary and must not
+    be misleading dead configuration."""
+    obsolete = {"defensive", "hold", "ambush"}
+    assert DEFENSIVE_INTENTS.isdisjoint(obsolete)
+
+
+def test_all_player_intent_values_classified_exactly_once():
+    """Vocabulary-drift guard: every real PlayerIntent enum value must be
+    classified as exactly one of aggressive or defensive - not both, not
+    neither. Protects against a future PlayerIntent addition silently
+    falling through unclassified, the same way this bug went undetected."""
+    all_values = {intent.value for intent in PlayerIntent}
+    for value in all_values:
+        in_aggressive = value in AGGRESSIVE_INTENTS
+        in_defensive  = value in DEFENSIVE_INTENTS
+        assert in_aggressive or in_defensive, (
+            f"PlayerIntent value '{value}' is not classified as aggressive "
+            f"or defensive"
+        )
+        assert not (in_aggressive and in_defensive), (
+            f"PlayerIntent value '{value}' is classified as both "
+            f"aggressive and defensive"
+        )
+    # Every entry in the classification sets must also be a real value -
+    # no leftover obsolete strings on either side.
+    assert AGGRESSIVE_INTENTS.issubset(all_values)
+    assert DEFENSIVE_INTENTS.issubset(all_values)
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +363,9 @@ def test_aggression_index_in_valid_range():
 def test_adaptability_zero_when_no_losses():
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push"] * 3, episode_id="ep_1")
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
     seed_episode(logger, "player_A", "win",
-                 player_intents=["defensive"] * 3, episode_id="ep_2")
+                 player_intents=["defend"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -328,9 +378,9 @@ def test_adaptability_one_when_always_adapts_after_loss():
     """Player loses then always changes strategy → adaptability = 1.0"""
     logger = temp_logger()
     seed_episode(logger, "player_A", "loss",
-                 player_intents=["aggressive_push"] * 3, episode_id="ep_1")
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
     seed_episode(logger, "player_A", "win",
-                 player_intents=["defensive"] * 3, episode_id="ep_2")
+                 player_intents=["defend"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -342,9 +392,9 @@ def test_adaptability_zero_when_never_adapts_after_loss():
     """Player loses twice with same strategy → no adaptation → 0.0"""
     logger = temp_logger()
     seed_episode(logger, "player_A", "loss",
-                 player_intents=["aggressive_push"] * 3, episode_id="ep_1")
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
     seed_episode(logger, "player_A", "loss",
-                 player_intents=["aggressive_push"] * 3, episode_id="ep_2")
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -355,13 +405,13 @@ def test_adaptability_zero_when_never_adapts_after_loss():
 def test_adaptability_in_valid_range():
     logger = temp_logger()
     seed_episode(logger, "player_A", "loss",
-                 player_intents=["aggressive_push"] * 3, episode_id="ep_1")
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
     seed_episode(logger, "player_A", "win",
                  player_intents=["siege"] * 3, episode_id="ep_2")
     seed_episode(logger, "player_A", "loss",
                  player_intents=["siege"] * 3, episode_id="ep_3")
     seed_episode(logger, "player_A", "win",
-                 player_intents=["defensive"] * 3, episode_id="ep_4")
+                 player_intents=["defend"] * 3, episode_id="ep_4")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -411,7 +461,7 @@ def test_preferred_units_graceful_when_unit_types_missing():
     data = {
         "id": "ep_old", "player_id": "player_A", "age": 1,
         "battlefield": {}, "top_zones": [], "general_intents": [],
-        "player_intents": ["defensive"] * 3, "terrain_events": [],
+        "player_intents": ["defend"] * 3, "terrain_events": [],
         "combat_results": [], "turns_played": 3, "result": "win",
         "general_unit_summary": {"total": 1, "surviving": 1,
                                   "loss_rate": 0.0, "avg_health": 1.0,
@@ -498,7 +548,7 @@ def test_terrain_counted_once_per_episode():
 def test_data_blob_contains_raw_evidence_keys():
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push", "defensive"])
+                 player_intents=["aggressive_rush", "defend"])
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
@@ -513,13 +563,13 @@ def test_data_blob_contains_raw_evidence_keys():
 def test_data_blob_intent_counts_accurate():
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push", "aggressive_push", "defensive"])
+                 player_intents=["aggressive_rush", "aggressive_rush", "defend"])
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
     counts = p["data"]["intent_counts"]
-    assert counts.get("aggressive_push") == 2
-    assert counts.get("defensive")       == 1
+    assert counts.get("aggressive_rush") == 2
+    assert counts.get("defend")          == 1
     logger.close()
 
 
@@ -557,7 +607,7 @@ def test_profile_summary_empty_when_no_profile():
 def test_profile_summary_structure():
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
-                 player_intents=["aggressive_push"] * 3,
+                 player_intents=["aggressive_rush"] * 3,
                  unit_types={"cavalry": 2})
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
@@ -605,8 +655,8 @@ def test_no_coordinates_in_any_profile_field():
 # ---------------------------------------------------------------------------
 
 def test_dominant_intent_returns_most_common():
-    intents = ["aggressive_push", "aggressive_push", "defensive"]
-    assert _dominant_intent(intents) == "aggressive_push"
+    intents = ["aggressive_rush", "aggressive_rush", "defend"]
+    assert _dominant_intent(intents) == "aggressive_rush"
 
 
 def test_dominant_intent_empty_list():
