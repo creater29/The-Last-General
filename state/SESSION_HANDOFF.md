@@ -1,21 +1,23 @@
 # Session Handoff
 
 ## Date: 2026-09-04
-## Stage: 3 (Live Pipeline) — Candidate E E1, Steps 1-2 of 3 complete
-## Tests: 413/413
-## Handoff to: next session (Step 3 — decision_engine.py)
+## Stage: 3 (Live Pipeline) — Candidate E E1 COMPLETE
+## Tests: 430/430
+## Handoff to: next session (Candidate E E2 is evidence-gated — do not
+##              start it without observed evidence E1 limits decision
+##              quality; see DEFERRED_ITEMS.md for what's next otherwise)
 
 ---
 
-## Session 2026-09-04 — Candidate E E1 Steps 1-2 implemented (Step 3 remains)
+## Session 2026-09-04 — Candidate E E1 implemented and closed (Steps 1-3)
 
-Implemented the first two of three E1 file changes, per the already-approved
-E1 Implementation Plan (ARCHITECTURE.md) — no new architectural decisions
+Implemented all three E1 file changes, per the already-approved E1
+Implementation Plan (ARCHITECTURE.md) — no new architectural decisions
 made this session, routine implementation of a pre-reviewed spec, matching
 the "state plan, wait for confirmation, implement" discipline used for every
 phase of Candidate D. Full detail in PROGRESS.md's Candidate E section
-(now updated — the "AUDIT + DESIGN COMPLETE — implementation not yet
-started" framing below is superseded).
+(now marked COMPLETE ✅ — the "AUDIT + DESIGN COMPLETE — implementation not
+yet started" framing below is superseded).
 
 **Step 1 (`snapshot.py`) — complete.** Added `known_enemy_composition:
 Optional[dict] = None`. 402 → 404 tests. Commit `85176cf`.
@@ -41,34 +43,63 @@ mismatches (test expected values not rounded the way the implementation
 rounds), caught by actually running the suite before claiming done, not
 assumed from the math.
 
-**Verified this session, not assumed:**
-- 413/413 full suite passing (re-run after every edit, not just at the end)
-- `run_integration_test.py`: 9/9 existing criteria PASS, 0 pipeline errors,
-  live production DB confirmed, after both Step 1 and Step 2 individually
-- `known_enemy_composition` is computed on every turn but not yet consumed
-  anywhere in `decision_engine.py` — confirmed this is the correct
-  intermediate state (Step 3 is the consumer), not a gap
+**Logged during Step 2, not fixed (per supervisor review — explicitly out
+of E1 scope):** `test_battle.py` (among other test files) uses a
+hardcoded absolute import path rather than one derived from `__file__`.
+Predates E1, unrelated to Candidate E. Tracked as W010 in
+KNOWN_ISSUES.md.
 
-**Logged, not fixed (per supervisor review — explicitly out of E1 scope):**
-`test_battle.py` (among other test files) uses a hardcoded absolute import
-path (`sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`)
-rather than one derived from `__file__`. This predates E1, is unrelated to
-Candidate E, and fixing it would be scope creep into unrelated test
-infrastructure per the Candidate Discipline rule. Tracked as W010 in
-KNOWN_ISSUES.md for a future consolidation audit.
+**Step 3 (`decision_engine.py`) — complete, first attempt approved.**
+Read the file fresh before writing anything: confirmed the four existing
+factor functions aren't perfectly uniform (`_doctrine_factor` returns a
+3-tuple with doctrine IDs; `_relationship_factor` takes `state` not
+`knowledge`) — `_composition_factor(intent, knowledge) -> (float,
+List[str])` matches `_player_factor`/`_situation_factor` exactly. Also
+confirmed `INTENT_TERRAIN_RELEVANCE` and `DEFENSIVE_HOLD`'s `_CAUTIOUS`
+classification were NOT drifted from ARCHITECTURE.md's claims, contrary
+to the caution that line numbers might have drifted — the actual mapping
+values were accurate, only cited line numbers were the risk (never
+checked directly, since the mapping content itself was verified instead).
 
-**Next: Step 3 — `decision_engine.py`.** Read the file fresh (signatures of
-the four existing factor functions, the real `INTENT_TERRAIN_RELEVANCE`
-mapping, `DEFENSIVE_HOLD`'s actual classification — verify against live
-code, not the line numbers cited in ARCHITECTURE.md, which may have
-drifted) before writing anything. Add `COMP_SIEGE_PENALTY`,
-`COMP_CAVALRY_BOOST`, `COMP_CAVALRY_EXPLOIT` module-level constants, add
-`_composition_factor(intent, knowledge)` matching the existing four-factor
-pattern exactly, wire into `decide()` after `_relationship_factor()`, add
-`composition_used: bool` to the return dict. Do NOT modify
-`_doctrine_factor()`. This closes E1 implementation — the 10th integration
-success criterion remains outstanding until this step adds the
-corresponding `run_integration_test.py` check.
+Added `COMP_SIEGE_PENALTY` (0.25), `COMP_CAVALRY_BOOST` (0.25),
+`COMP_CAVALRY_EXPLOIT` (0.20), wired `_composition_factor()` into
+`decide()`'s scoring loop after `_relationship_factor()`.
+`composition_used` added to `decide()`'s return dict — `True` only when
+composition is non-`None` AND confidence `> 0` (per supervisor decision,
+explicitly not "is not None" alone) — and to `_fallback_response()` as
+`False`, per supervisor instruction, so this new field does not repeat
+the pre-existing `relationship_used` omission on that path (that
+omission is separately logged as W011, not fixed).
+
+413 → 430 tests (17 new, commit `8eb8a6f`), all worked examples verified
+numerically against the live implementation before being written as
+tests. `scripts/run_integration_test.py` gained the 10th and final
+integration criterion (composition observed on some turns) — deliberately
+without re-verifying the scoring formula there, per the supervisor
+decision that removed the originally-planned criterion 11 (that stays
+in `test_decision_engine.py`, deterministically).
+
+**Live integration result: all 10 criteria PASS, 0 pipeline errors.**
+Sample trace from the actual run: *"Confirmed enemy cavalry (confidence
+0.60) on forest terrain — ambush conditions favourable against
+cavalry"* — the composition factor firing correctly end-to-end in a real
+battle, not just in isolated unit tests.
+
+**Candidate E E1 is closed.** Per the staged model (E1→E2→E3→E4), do not
+begin E2 (Information Availability) without observed evidence that E1's
+current capability is limiting the General's decision quality — same
+evidence-gating discipline as D023-D027.
+
+**Two documentation errors were made and self-caught this session** (worth
+recording so the next session doesn't repeat the pattern of trusting a
+number without re-deriving it): claimed "integration criteria 10-11" when
+only a 10th criterion was ever approved (fixed, commit `b02bd18`); and
+`ARCHITECTURE.md` itself briefly contained a genuine internal contradiction
+(section header said "the 10th criterion" while the list below it defined
+both 10 and 11) that a supervisor review caught (fixed, commit `2cc2305`).
+Both were caught by re-reading the source file fresh rather than trusting
+a previously-stated number — the same discipline this project asks of
+every session.
 
 ---
 
@@ -105,10 +136,48 @@ All three rounds produced real corrections. The specification is now:
 
 ## ⚠️ NEW CHAT HANDOFF PROMPT (copy-paste this exactly)
 
-**Superseded 2026-09-04 — Steps 1-2 are now complete.** The prompt below is
-kept as a historical record of how this session was bootstrapped (its
-"402/402" and "three source files" framing describe the state at session
-start, not now). Use this replacement prompt for the next session instead:
+**Superseded again, 2026-09-04 — Step 3 is now also complete, Candidate E
+E1 is fully closed.** The "Steps 1-2" replacement prompt directly below is
+itself now superseded (kept for the historical record of the mid-session
+handoff point) by the prompt after it, which reflects E1's actual closure.
+
+```
+I'm continuing development of "The Last General's Mind" project.
+You have full terminal access to my local machine via Desktop Commander MCP.
+
+Before doing anything else, run this verification:
+
+    cd ~/Projects/general_brain && python3 -m pytest tests/ --tb=short -q
+
+Then read these files in this exact order — fully, no skimming:
+1. state/CLAUDE_BRIEFING.md
+2. state/ARCHITECTURE.md
+3. state/PROGRESS.md
+4. state/KNOWN_ISSUES.md
+5. state/SESSION_HANDOFF.md
+6. state/DEFERRED_ITEMS.md
+
+Once you have read all six files and confirmed 430/430 tests pass, tell me:
+
+1. What Candidate E E1 achieved overall (one sentence), and confirm all
+   three of its steps are committed
+2. What the E1 staged model says about starting E2 (Information
+   Availability) — what evidence-based trigger, if any, has been observed
+   so far
+3. What DEFERRED_ITEMS.md's next-eligible item is, given its evidence-based
+   triggers, if E2 is not yet warranted
+4. What W010 and W011 in KNOWN_ISSUES.md are, and why neither was fixed
+   during E1
+5. What the live integration test's 10 success criteria are, and which one
+   is specific to Candidate E
+
+Do not start writing any code until I confirm your understanding is correct,
+and do not assume E2 should start just because E1 is done — advancement is
+evidence-gated, not sequence-gated.
+```
+
+Steps-1-2-era replacement prompt (superseded by the one above, kept for
+the historical record):
 
 ```
 I'm continuing development of "The Last General's Mind" project.
@@ -181,42 +250,47 @@ Do not start writing any code until I confirm your understanding is correct.
 
 ## Current state for implementation
 
-Steps 1 and 2 of 3 are complete and committed (`85176cf`, `4c5d71e`,
-`ea26310`, `2525658`). Only Step 3 (`src/brain/decision_engine.py`)
-remains to close E1. The "NEXT WORK" section below has the full Step 3
-plan — still accurate and unchanged from the original approved E1
-Implementation Plan; only its Step 1/Step 2 sub-sections are now marked
-complete rather than pending.
+**Candidate E E1 is fully complete and closed** — all three steps
+committed (`85176cf`, `4c5d71e`, `ea26310`, `2525658`, `8eb8a6f`, plus
+doc-correction commits `60b34c6`, `b02bd18`, `2cc2305`). The "NEXT WORK"
+section below documents the completed plan for historical reference; there
+is no outstanding E1 work.
 
-Key facts the new instance must not assume (verified in this session):
+Key facts for whatever comes next:
 - All three direct `CommanderKnowledge` callers used keyword arguments
   exclusively → Step 1 required zero changes to any existing caller
-  (confirmed, not assumed — now moot, Step 1 is done)
-- `RECON_*` constants are confirmed MODULE-LEVEL in `battle.py` (done)
+  (confirmed, not assumed)
+- `RECON_*` constants are module-level in `battle.py`, `COMP_*` constants
+  are module-level in `decision_engine.py` — both confirmed importable
+  directly by tests, not local to any function
 - `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`
-  — takes intent first, exactly matching all four existing factor functions
-  — this is still the Step 3 target signature, not yet implemented
-- `known_enemy_composition = None` → `_composition_factor()` must return
-  `(1.0, [])` for every intent — identical to today's behavior — not yet
-  implemented, this is Step 3's job
+  — matches `_player_factor`/`_situation_factor` exactly, implemented and
+  wired into `decide()` after `_relationship_factor()`
+- `known_enemy_composition = None` → `_composition_factor()` returns
+  `(1.0, [])` for every intent — identical to pre-E1 behavior — implemented
+  and tested
+- E2 (Information Availability) is evidence-gated, not automatically next
+  — do not start it without observed evidence that E1's current capability
+  limits the General's decision quality
 
 ---
 
-## NEXT WORK: Candidate E — E1 Step 3 only (Steps 1-2 COMPLETE)
+## NEXT WORK (historical — E1 Steps 1-3, ALL COMPLETE)
 
 Full architecture sequence complete (Audit → Perception Architecture →
 E001 → E1 Technical Specification → E1 Implementation Plan), all
-permanent in ARCHITECTURE.md. Steps 1-2 of implementation are complete
-and committed; Step 3 has not started.
+permanent in ARCHITECTURE.md. All three implementation steps are complete
+and committed. This section is kept as the historical plan that was
+actually executed — nothing below is outstanding.
 
-The next session's first task is to read `decision_engine.py` fresh (the
-plan below cites specific line numbers from ARCHITECTURE.md that may have
-drifted — verify against the live file, don't trust them), confirm the
-implementation plan, then implement. Per standing project discipline: read
-the relevant files fresh, state the implementation plan explicitly, wait
-for confirmation, then code.
+Originally, the next session's first task was to read `decision_engine.py`
+fresh (the plan below cites specific line numbers from ARCHITECTURE.md
+that may have drifted — verify against the live file, don't trust them),
+confirm the implementation plan, then implement. That was done: the
+`INTENT_TERRAIN_RELEVANCE` mapping and `DEFENSIVE_HOLD`'s classification
+were both confirmed accurate against live code before Step 3 began.
 
-### What to implement (summary — full detail in ARCHITECTURE.md "E1 Implementation Plan")
+### What was implemented (summary — full detail in ARCHITECTURE.md "E1 Implementation Plan")
 
 Three source files change. Everything else is explicitly untouched.
 
@@ -240,32 +314,39 @@ RECON_THRESHOLD` (verified this is `>=` not `>` via an exact-boundary
 test), else `None`. 404 → 413 tests across two commits (one supervisor
 review round in between).
 
-**Step 3 — `src/brain/decision_engine.py`**
-Add module-level `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`.
+**Step 3 — `src/brain/decision_engine.py` — COMPLETE ✅ (commit `8eb8a6f`)**
+Added module-level `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`.
 **CORRECTED from earlier plan (supervisor review):** original plan specified
 `_composition_factor(knowledge)` — breaking the established pattern where
 every factor function takes `intent` first and returns `(factor, notes)`.
-Confirmed by reading all four existing factor function signatures directly.
-- `knowledge.known_enemy_composition is None` → return `(1.0, [])`
-- `confidence = 0.0` → return `(1.0, [])`
-- `siege: True` + high confidence → confidence-scaled penalty on `DEFENSIVE_HOLD` (a `_CAUTIOUS`
-  intent per `decision_engine.py:353` — holding against confirmed siege is
-  a different risk than holding against infantry)
-- `cavalry: True` + forest in `knowledge.visible_terrain` + high confidence
-  → confidence-scaled boost on `AMBUSH` (forest in `INTENT_TERRAIN_RELEVANCE["AMBUSH"]`,
-  verified at `decision_engine.py:73` — cavalry in forest terrain is what
-  makes an ambush viable; knowing cavalry is present sharpens that)
-- `cavalry: True` + frozen_lake in `knowledge.visible_terrain` + high confidence
-  → confidence-scaled boost on `TERRAIN_EXPLOIT` (frozen_lake in
-  `INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`, verified at `decision_engine.py:71`)
-- **Do NOT modify `_doctrine_factor()`** — composition is its own independent
-  decision input with its own reasoning trace, not a modifier of doctrine
-  relevance; changing `_doctrine_factor()` would conflate two separate signals
-Wire into `decide()` after `_relationship_factor()`. Add
-`composition_used: bool` to return dict (True when composition is non-None
-AND confidence > 0).
-Read `decision_engine.py` fresh before editing — factor function pattern
-already established by 4 prior functions, follow it exactly.
+Confirmed by reading all four existing factor function signatures directly
+before implementing — also found the pattern isn't perfectly uniform
+(`_doctrine_factor` returns a 3-tuple with doctrine IDs; `_relationship_factor`
+takes `state` not `knowledge`), so the target signature was matched to
+`_player_factor`/`_situation_factor` specifically, not all four blindly.
+- `knowledge.known_enemy_composition is None` → returns `(1.0, [])` ✅
+- `confidence = 0.0` → returns `(1.0, [])` ✅
+- `siege: True` + confidence → confidence-scaled penalty on `DEFENSIVE_HOLD`
+  (`_CAUTIOUS` intent, confirmed directly in the live file — holding
+  against confirmed siege is a different risk than holding against
+  infantry): `1.0 - (COMP_SIEGE_PENALTY * confidence)` ✅
+- `cavalry: True` + forest in `knowledge.visible_terrain` + confidence
+  → confidence-scaled boost on `AMBUSH`: `1.0 + (COMP_CAVALRY_BOOST * confidence)`
+  (forest confirmed in `INTENT_TERRAIN_RELEVANCE["AMBUSH"]` directly in the
+  live file, not assumed from ARCHITECTURE.md's line-number citation) ✅
+- `cavalry: True` + frozen_lake in `knowledge.visible_terrain` + confidence
+  → confidence-scaled boost on `TERRAIN_EXPLOIT`: `1.0 + (COMP_CAVALRY_EXPLOIT * confidence)`
+  (frozen_lake confirmed in `INTENT_TERRAIN_RELEVANCE["TERRAIN_EXPLOIT"]`
+  directly in the live file) ✅
+- `_doctrine_factor()` — confirmed untouched ✅
+Wired into `decide()` after `_relationship_factor()`. `composition_used: bool`
+added to the return dict (`True` only when composition is non-`None` AND
+confidence `> 0`, per supervisor decision), and explicitly added to
+`_fallback_response()` as `False` (per supervisor decision, so this field
+does not repeat the pre-existing `relationship_used` omission on that path
+— see W011). 413 → 430 tests across one commit (17 new). Live integration
+test: all 10 criteria PASS, sample trace confirms the boost firing
+correctly in a real battle.
 
 ### Tests to add
 
@@ -281,9 +362,11 @@ Per-file, same discipline as Candidate D phases:
 - `test_decision_engine.py`: _composition_factor() with None → 1.0; with
   siege True + high confidence → DEFENSIVE_HOLD penalized; with cavalry
   True + high confidence on forest terrain → TERRAIN_EXPLOIT or AMBUSH
-  boosted; with confidence = 0.0 → 1.0 — NOT STARTED (Step 3)
-- `run_integration_test.py`: add 10th and 11th criteria (see ARCHITECTURE.md
-  "E1 integration success criteria") — NOT STARTED (Step 3)
+  boosted; with confidence = 0.0 → 1.0; plus composition_used correctness
+  at the decide() level and a direct _fallback_response() test — DONE ✅
+  (commit `8eb8a6f`, 17 tests)
+- `run_integration_test.py`: add the 10th success criterion (composition
+  observed on some turns) — DONE ✅ (commit `8eb8a6f`)
 
 ### Audit before writing any code (standing rule)
 

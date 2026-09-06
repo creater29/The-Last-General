@@ -1,8 +1,8 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
-## Last Updated: 2026-09-04 (Candidate E E1 Steps 1-2 complete)
-## Test Count: 413/413
+## Last Updated: 2026-09-04 (Candidate E E1 COMPLETE)
+## Test Count: 430/430
 
 ---
 
@@ -498,7 +498,7 @@ reader without this reconciliation).
 reopening it unless new evidence emerges (D023/D024/D025/D026/D027 each
 have explicit, evidence-based re-evaluation triggers — none are timelines).
 
-### Candidate E — Scout Mechanics (Perception Enhancement, Stage E1) [IN PROGRESS 🔄 — Steps 1-2 of 3 complete]
+### Candidate E — Scout Mechanics (Perception Enhancement, Stage E1) [COMPLETE ✅ (2026-09-04)]
 
 **Prerequisite work done before any implementation, matching D014's rigor:**
 1. Full audit of `battle.py`, `grid.py`, `snapshot.py`, existing hooks —
@@ -596,13 +596,50 @@ quality. Same discipline as D023-D027.
   `requirements.txt`, found during the same review response).
 
 **Step 3 — `decision_engine.py` (`_composition_factor()`, wiring,
-`COMP_*` constants, `composition_used` in `decide()`'s return dict) — NOT
-STARTED.** This closes E1 implementation. The 10th integration success
-criterion (from ARCHITECTURE.md's "E1 integration success criteria")
-remains outstanding until Step 3 wires composition into `decide()`'s
-scoring loop and `scripts/run_integration_test.py` gains the corresponding
-check — the original 9 integration criteria (Candidates A-C) are
-unaffected and still pass.
+`COMP_*` constants, `composition_used` in `decide()`'s return dict) —
+COMPLETE ✅ (2026-09-04, commit `8eb8a6f`)**
+- `src/brain/decision_engine.py`: added `COMP_SIEGE_PENALTY` (0.25),
+  `COMP_CAVALRY_BOOST` (0.25), `COMP_CAVALRY_EXPLOIT` (0.20) module-level
+  constants and `_composition_factor(intent, knowledge) -> (float,
+  List[str])`, matching `_player_factor`/`_situation_factor`'s exact
+  signature — confirmed against all four existing factor functions by
+  direct read before writing, not assumed. Wired into `decide()`'s scoring
+  loop after `_relationship_factor()`. `_doctrine_factor()` untouched, as
+  required. `composition_used` added to `decide()`'s return dict (`True`
+  only when composition is non-`None` AND confidence `> 0`, per supervisor
+  decision) and explicitly to `_fallback_response()` as `False` — this
+  field does NOT repeat the pre-existing `relationship_used` omission on
+  that path (see W011 below).
+- `tests/test_decision_engine.py`: 17 new tests. All five worked examples
+  from ARCHITECTURE.md verified numerically against the live
+  implementation before being written as tests (0.75, 0.875, 1.25, 1.20,
+  and the no-op case), asserted against imported `COMP_*` constants, not
+  hardcoded literals. A direct `_fallback_response()` test proves
+  `composition_used` is present and `False` on that path — necessary
+  because `decide()`'s fallback branch is unreachable via the public API
+  today (see W011).
+- Test count: 413 → 430, all passing.
+- `scripts/run_integration_test.py`: added the 10th and final integration
+  success criterion — `known_enemy_composition` non-`None` on at least
+  some turns. Deliberately does not re-verify the scoring formula here
+  (that's `test_decision_engine.py`'s job, deterministically) — per the
+  supervisor decision that removed the originally-planned criterion 11.
+- **Live integration result: all 10 criteria PASS, 0 pipeline errors.**
+  Sample trace from the actual run: *"Confirmed enemy cavalry (confidence
+  0.60) on forest terrain — ambush conditions favourable against
+  cavalry"* — proving the wiring works end-to-end in a real battle, not
+  only in isolated unit tests.
+
+**Candidate E E1 acceptance:** impl ✓ | unit tests ✓ (430/430) |
+integration ✓ (10/10 criteria) | db verified ✓ (live production DB,
+`known_enemy_composition` observed 28/30 turns in the sample run) |
+docs ✓ (this section, SESSION_HANDOFF, KNOWN_ISSUES, ARCHITECTURE all
+updated and cross-checked).
+
+**Candidate E E1 is closed.** Per the staged model, advancement to E2
+(Information Availability) is evidence-gated — do not begin E2 until E1
+demonstrably limits the General's decision quality in observed play, same
+discipline as D023-D027 and E1 itself.
 
 **Tracked, not fixed during E1 (logged per supervisor review, 2026-09-04):**
 several test files — including `test_battle.py`, touched during Step 2 —
@@ -610,7 +647,11 @@ use a hardcoded absolute import path
 (`sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`) rather
 than a path derived from `__file__`. This predates E1 and is unrelated to
 Candidate E's scope; fixing it now would be scope creep into unrelated test
-infrastructure. Full detail in KNOWN_ISSUES.md.
+infrastructure. Logged as W010. Separately, `decide()`'s
+`_fallback_response()` was found missing the documented `relationship_used`
+key (predates E1; `composition_used` was deliberately NOT allowed to repeat
+this mistake, per supervisor decision — see Step 3 above). Logged as W011.
+Full detail on both in KNOWN_ISSUES.md.
 
 ---
 
