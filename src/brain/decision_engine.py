@@ -39,6 +39,7 @@ Import rule (Rule 3 extended):
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from simulator.logger   import EpisodeLogger
@@ -443,6 +444,40 @@ COMP_CAVALRY_EXPLOIT = 0.20  # TERRAIN_EXPLOIT (+frozen_lake): 1.0 + (COMP_CAVAL
                               # range: [1.0, 1.20]
 
 
+def _valid_composition(composition: Any) -> bool:
+    """
+    True iff `composition` matches the documented known_enemy_composition
+    shape exactly: a dict with boolean cavalry/siege flags and a finite
+    numeric confidence in [0, 1].
+
+    Implements E1's documented failure-mode contract (ARCHITECTURE.md):
+    "No observation / confidence = 0.0 / malformed / None -> factor = 1.0
+    for all intents." Malformed data must be neutral, not raise - this is
+    the single source of truth both _composition_factor() and decide()'s
+    composition_used computation use, so the two can never disagree on
+    what counts as a valid observation.
+    """
+    if not isinstance(composition, dict):
+        return False
+
+    cavalry = composition.get("cavalry")
+    siege   = composition.get("siege")
+    if not isinstance(cavalry, bool) or not isinstance(siege, bool):
+        return False
+
+    confidence = composition.get("confidence")
+    # bool is a subclass of int in Python - explicitly excluded so
+    # confidence=True isn't silently accepted as confidence=1.0.
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        return False
+    if not math.isfinite(confidence):
+        return False
+    if not (0.0 <= confidence <= 1.0):
+        return False
+
+    return True
+
+
 def _composition_factor(
     intent:    str,
     knowledge: CommanderKnowledge,
@@ -455,7 +490,9 @@ def _composition_factor(
     fired this turn (see battle.py's RECON_THRESHOLD gate) — this is the
     default for every turn until reconnaissance fires, and is treated
     identically to a zero-confidence observation: factor = 1.0 for every
-    intent, no reasoning notes.
+    intent, no reasoning notes. Malformed data (wrong shape, non-boolean
+    flags, non-numeric/out-of-range confidence) is treated identically —
+    see _valid_composition() — never raised on.
 
     Only three intent/composition combinations currently carry a signal —
     everything else is neutral:
@@ -466,15 +503,16 @@ def _composition_factor(
         cavalry present + frozen_lake on the battlefield -> TERRAIN_EXPLOIT
                             boosted
     """
-    if knowledge.known_enemy_composition is None:
+    composition = knowledge.known_enemy_composition
+    if not _valid_composition(composition):
         return 1.0, []
 
-    confidence = knowledge.known_enemy_composition.get("confidence", 0.0)
+    confidence = composition["confidence"]
     if confidence <= 0.0:
         return 1.0, []
 
-    siege   = knowledge.known_enemy_composition.get("siege", False)
-    cavalry = knowledge.known_enemy_composition.get("cavalry", False)
+    siege   = composition["siege"]
+    cavalry = composition["cavalry"]
     terrain = knowledge.visible_terrain
 
     if intent == "DEFENSIVE_HOLD" and siege:
@@ -623,8 +661,8 @@ class DecisionEngine:
 
         composition = knowledge.known_enemy_composition
         composition_used = (
-            composition is not None
-            and composition.get("confidence", 0.0) > 0.0
+            _valid_composition(composition)
+            and composition["confidence"] > 0.0
         )
 
         return {

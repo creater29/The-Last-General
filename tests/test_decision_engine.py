@@ -32,7 +32,7 @@ from brain.player_profiler import PlayerProfiler
 from brain.decision_engine import (
     DecisionEngine, ALL_INTENTS, FALLBACK_INTENT,
     _filter_intents, _doctrine_factor, _player_factor, _situation_factor,
-    _composition_factor,
+    _composition_factor, _valid_composition,
     COMP_SIEGE_PENALTY, COMP_CAVALRY_BOOST, COMP_CAVALRY_EXPLOIT,
 )
 
@@ -1027,3 +1027,132 @@ def test_decide_composition_boost_reflected_in_reasoning():
     factor, notes = _composition_factor("AMBUSH", k)
     assert factor > 1.0
     assert any("cavalry" in n.lower() for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# Malformed known_enemy_composition (Candidate E, E1 - failure mode contract)
+# ---------------------------------------------------------------------------
+#
+# ARCHITECTURE.md's failure-mode table is explicit: "No observation /
+# confidence = 0.0 / malformed / None -> factor = 1.0 for all intents."
+# _valid_composition() is the single source of truth both
+# _composition_factor() and decide()'s composition_used computation share,
+# so these two groups of tests exercise the same gate from both call sites.
+
+def test_valid_composition_accepts_documented_shape():
+    assert _valid_composition({
+        "cavalry": True, "siege": False, "confidence": 0.6
+    }) is True
+
+
+def test_valid_composition_accepts_boundary_confidence_values():
+    assert _valid_composition({"cavalry": True, "siege": True, "confidence": 0.0}) is True
+    assert _valid_composition({"cavalry": True, "siege": True, "confidence": 1.0}) is True
+
+
+def test_valid_composition_rejects_non_dict_values():
+    """Non-dict value (string, list, int, bool) -> invalid, not a crash."""
+    for bad in ("not a dict", ["cavalry", True], 42, True, 3.14):
+        assert _valid_composition(bad) is False
+
+
+def test_valid_composition_rejects_missing_or_non_boolean_flags():
+    assert _valid_composition({"siege": False, "confidence": 0.5}) is False  # cavalry missing
+    assert _valid_composition({"cavalry": True, "confidence": 0.5}) is False  # siege missing
+    assert _valid_composition({"cavalry": 1, "siege": False, "confidence": 0.5}) is False
+    assert _valid_composition({"cavalry": "yes", "siege": False, "confidence": 0.5}) is False
+    assert _valid_composition({"cavalry": True, "siege": None, "confidence": 0.5}) is False
+
+
+def test_valid_composition_rejects_non_numeric_confidence():
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": "0.6"}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": None}) is False
+    assert _valid_composition({"cavalry": True, "siege": False}) is False  # confidence missing
+
+
+def test_valid_composition_rejects_boolean_confidence():
+    """bool is a subclass of int in Python - confidence=True must NOT be
+    silently accepted as confidence=1.0."""
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": True}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": False}) is False
+
+
+def test_valid_composition_rejects_out_of_range_confidence():
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": -0.1}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": 1.1}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": 100}) is False
+
+
+def test_valid_composition_rejects_non_finite_confidence():
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": float("nan")}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": float("inf")}) is False
+    assert _valid_composition({"cavalry": True, "siege": False, "confidence": float("-inf")}) is False
+
+
+def test_composition_factor_neutral_on_non_dict_value():
+    """_composition_factor() must not raise on a malformed non-dict value —
+    it returns neutral, matching the documented failure-mode contract."""
+    k = make_knowledge(known_enemy_composition="not a dict")
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_neutral_on_invalid_unit_flags():
+    k = make_knowledge(known_enemy_composition={
+        "cavalry": "yes", "siege": False, "confidence": 0.9
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_neutral_on_out_of_range_confidence():
+    k = make_knowledge(known_enemy_composition={
+        "cavalry": False, "siege": True, "confidence": 5.0
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_composition_factor_neutral_on_non_numeric_confidence():
+    k = make_knowledge(known_enemy_composition={
+        "cavalry": False, "siege": True, "confidence": "high"
+    })
+    factor, notes = _composition_factor("DEFENSIVE_HOLD", k)
+    assert factor == 1.0
+    assert notes == []
+
+
+def test_decide_composition_used_false_on_non_dict_value():
+    """decide() must not raise when known_enemy_composition is malformed —
+    composition_used is False, everything else proceeds normally."""
+    logger = temp_logger()
+    engine = make_engine(logger)
+    k = make_knowledge(known_enemy_composition=["cavalry", True])
+    result = engine.decide(k)
+    assert result["composition_used"] is False
+    logger.close()
+
+
+def test_decide_composition_used_false_on_invalid_unit_flags():
+    logger = temp_logger()
+    engine = make_engine(logger)
+    k = make_knowledge(known_enemy_composition={
+        "cavalry": 1, "siege": 0, "confidence": 0.8
+    })
+    result = engine.decide(k)
+    assert result["composition_used"] is False
+    logger.close()
+
+
+def test_decide_composition_used_false_on_out_of_range_confidence():
+    logger = temp_logger()
+    engine = make_engine(logger)
+    k = make_knowledge(known_enemy_composition={
+        "cavalry": True, "siege": False, "confidence": 1.5
+    })
+    result = engine.decide(k)
+    assert result["composition_used"] is False
+    logger.close()
