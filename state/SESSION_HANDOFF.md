@@ -66,18 +66,14 @@ Added `COMP_SIEGE_PENALTY` (0.25), `COMP_CAVALRY_BOOST` (0.25),
 `decide()`'s scoring loop after `_relationship_factor()`.
 `composition_used` added to `decide()`'s return dict — `True` only when
 composition is non-`None` AND confidence `> 0` (per supervisor decision,
-explicitly not "is not None" alone) — and to `_fallback_response()` as
+explicitly not "is not None" alone — **superseded by the hardening pass
+further below: the actual, current rule is stricter, requiring
+`composition` to pass `_valid_composition()` (correct shape, types, and
+finite in-range confidence) in addition to `confidence > 0`, not merely
+"is not `None`"**) — and to `_fallback_response()` as
 `False`, per supervisor instruction, so this new field does not repeat
 the pre-existing `relationship_used` omission on that path (that
 omission is separately logged as W011, not fixed).
-
-**Superseded by the hardening pass further below:** the rule above was
-this step's original implementation, but it did not validate the shape of
-`composition` before reading `confidence` from it. The actual, current
-rule (since commit `9588fc6`) is stricter: `composition_used` is `True`
-only when `composition` passes `_valid_composition()` (correct shape,
-types, and finite in-range confidence) AND `confidence > 0` — not merely
-"is not `None`".
 
 413 → 430 tests (17 new, commit `8eb8a6f`), all worked examples verified
 numerically against the live implementation before being written as
