@@ -607,7 +607,10 @@ COMPLETE ✅ (2026-09-04, commit `8eb8a6f`)**
   loop after `_relationship_factor()`. `_doctrine_factor()` untouched, as
   required. `composition_used` added to `decide()`'s return dict (`True`
   only when composition is non-`None` AND confidence `> 0`, per supervisor
-  decision) and explicitly to `_fallback_response()` as `False` — this
+  decision — **superseded by the hardening pass below: the actual rule is
+  stricter, requiring a `_valid_composition()`-passing observation with
+  confidence `> 0`, not merely non-`None`**) and explicitly to
+  `_fallback_response()` as `False` — this
   field does NOT repeat the pre-existing `relationship_used` omission on
   that path (see W011 below).
 - `tests/test_decision_engine.py`: 17 new tests. All five worked examples

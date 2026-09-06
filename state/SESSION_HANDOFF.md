@@ -71,6 +71,14 @@ explicitly not "is not None" alone) — and to `_fallback_response()` as
 the pre-existing `relationship_used` omission on that path (that
 omission is separately logged as W011, not fixed).
 
+**Superseded by the hardening pass further below:** the rule above was
+this step's original implementation, but it did not validate the shape of
+`composition` before reading `confidence` from it. The actual, current
+rule (since commit `9588fc6`) is stricter: `composition_used` is `True`
+only when `composition` passes `_valid_composition()` (correct shape,
+types, and finite in-range confidence) AND `confidence > 0` — not merely
+"is not `None`".
+
 413 → 430 tests (17 new, commit `8eb8a6f`), all worked examples verified
 numerically against the live implementation before being written as
 tests. `scripts/run_integration_test.py` gained the 10th and final
