@@ -1,8 +1,8 @@
 # Session Handoff
 
 ## Date: 2026-09-04
-## Stage: 3 (Live Pipeline) — Candidate E E1 COMPLETE
-## Tests: 430/430
+## Stage: 3 (Live Pipeline) — Candidate E E1 COMPLETE + hardened
+## Tests: 445/445
 ## Handoff to: next session (Candidate E E2 is evidence-gated — do not
 ##              start it without observed evidence E1 limits decision
 ##              quality; see DEFERRED_ITEMS.md for what's next otherwise)
@@ -90,6 +90,22 @@ begin E2 (Information Availability) without observed evidence that E1's
 current capability is limiting the General's decision quality — same
 evidence-gating discipline as D023-D027.
 
+**Post-closure hardening (commit `9588fc6`):** a supervisor review after
+E1 was marked complete found a real contract gap — ARCHITECTURE.md's
+failure-mode table explicitly says "malformed" data must be neutral
+(factor = 1.0), but the implementation only guarded against `None`. A
+malformed `known_enemy_composition` (wrong type, missing keys, out-of-range
+or non-finite confidence) would have raised instead. Added
+`_valid_composition()` as the single shared validator used by both
+`_composition_factor()` and `decide()`'s `composition_used` computation,
+plus 15 tests covering the failure modes directly (including the
+bool-is-a-subclass-of-int trap for `confidence=True`). 430 → 445 tests.
+Integration test re-run: all 10 criteria still PASS, normal-path behavior
+unchanged. This was legitimate hardening of an already-documented
+contract, not scope creep — the failure mode was written into
+ARCHITECTURE.md before Step 3 was ever implemented; the implementation
+had simply missed one branch of it.
+
 **Two documentation errors were made and self-caught this session** (worth
 recording so the next session doesn't repeat the pattern of trusting a
 number without re-deriving it): claimed "integration criteria 10-11" when
@@ -157,7 +173,7 @@ Then read these files in this exact order — fully, no skimming:
 5. state/SESSION_HANDOFF.md
 6. state/DEFERRED_ITEMS.md
 
-Once you have read all six files and confirmed 430/430 tests pass, tell me:
+Once you have read all six files and confirmed 445/445 tests pass, tell me:
 
 1. What Candidate E E1 achieved overall (one sentence), and confirm all
    three of its steps are committed
@@ -250,11 +266,12 @@ Do not start writing any code until I confirm your understanding is correct.
 
 ## Current state for implementation
 
-**Candidate E E1 is fully complete and closed** — all three steps
-committed (`85176cf`, `4c5d71e`, `ea26310`, `2525658`, `8eb8a6f`, plus
-doc-correction commits `60b34c6`, `b02bd18`, `2cc2305`). The "NEXT WORK"
-section below documents the completed plan for historical reference; there
-is no outstanding E1 work.
+**Candidate E E1 is fully complete, closed, and hardened** — all three
+steps plus a post-closure hardening pass committed (`85176cf`, `4c5d71e`,
+`ea26310`, `2525658`, `8eb8a6f`, `9588fc6`, plus doc-correction commits
+`60b34c6`, `b02bd18`, `2cc2305`, `110b54f`). The "NEXT WORK" section below
+documents the completed plan for historical reference; there is no
+outstanding E1 work.
 
 Key facts for whatever comes next:
 - All three direct `CommanderKnowledge` callers used keyword arguments
@@ -263,6 +280,12 @@ Key facts for whatever comes next:
 - `RECON_*` constants are module-level in `battle.py`, `COMP_*` constants
   are module-level in `decision_engine.py` — both confirmed importable
   directly by tests, not local to any function
+- `_valid_composition(composition) -> bool` in `decision_engine.py` is the
+  single source of truth for what counts as a well-formed
+  `known_enemy_composition` — used by both `_composition_factor()` and
+  `decide()`'s `composition_used` computation. Malformed data (wrong type,
+  missing/non-boolean flags, non-numeric/out-of-range/non-finite
+  confidence) is neutral, never raises.
 - `_composition_factor(intent: str, knowledge: CommanderKnowledge) -> Tuple[float, List[str]]`
   — matches `_player_factor`/`_situation_factor` exactly, implemented and
   wired into `decide()` after `_relationship_factor()`

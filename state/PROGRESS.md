@@ -1,8 +1,8 @@
 # Progress Tracker
 
 ## Current Stage: STAGE 3 — IN PROGRESS 🔄
-## Last Updated: 2026-09-04 (Candidate E E1 COMPLETE)
-## Test Count: 430/430
+## Last Updated: 2026-09-04 (Candidate E E1 COMPLETE + hardened)
+## Test Count: 445/445
 
 ---
 
@@ -630,9 +630,26 @@ COMPLETE ✅ (2026-09-04, commit `8eb8a6f`)**
   cavalry"* — proving the wiring works end-to-end in a real battle, not
   only in isolated unit tests.
 
-**Candidate E E1 acceptance:** impl ✓ | unit tests ✓ (430/430) |
+**Hardening pass — COMPLETE ✅ (2026-09-04, commit `9588fc6`, post-closure
+supervisor review):** ARCHITECTURE.md's failure-mode table explicitly
+listed "malformed" alongside `None` and `confidence = 0.0` as cases
+requiring `factor = 1.0`, but the initial implementation only checked for
+`None` — a malformed `known_enemy_composition` dict (wrong types, missing
+keys, out-of-range or non-finite confidence) would raise instead of
+returning neutral. Added `_valid_composition()` as the single source of
+truth for shape validation (dict, boolean `cavalry`/`siege` with explicit
+bool-as-int exclusion, finite numeric confidence in `[0, 1]`), used by both
+`_composition_factor()` and `decide()`'s `composition_used` computation.
+15 new tests covering non-dict values, invalid unit flags, non-numeric/
+out-of-range/non-finite confidence, at both the raw-validator and
+full-`decide()` level. Test count: 430 → 445. Integration test re-run
+after this change: all 10 criteria still PASS, normal-path behavior
+unaffected (28/30 turns observed, unchanged from before hardening).
+
+**Candidate E E1 acceptance:** impl ✓ | unit tests ✓ (445/445) |
 integration ✓ (10/10 criteria) | db verified ✓ (live production DB,
 `known_enemy_composition` observed 28/30 turns in the sample run) |
+failure-mode contract ✓ (malformed input verified neutral, not raising) |
 docs ✓ (this section, SESSION_HANDOFF, KNOWN_ISSUES, ARCHITECTURE all
 updated and cross-checked).
 
