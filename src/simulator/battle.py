@@ -227,12 +227,19 @@ class BattleLoop:
     # Main entry point
     # ------------------------------------------------------------------
 
-    def run(self, general_intent_fn=None) -> BattleState:
+    def run(self, general_intent_fn=None, player_intent_fn=None) -> BattleState:
         """
         Run a complete battle to conclusion.
 
         general_intent_fn: callable(BattleState) → GeneralIntent
         If None, uses random intent selection (for data generation).
+
+        player_intent_fn: callable(BattleState) → PlayerIntent
+        If None, uses _scripted_player_intent() unchanged (for data
+        generation) — this parameter's absence must not change existing
+        behavior. Symmetric with general_intent_fn, added to allow
+        controlled player archetypes in validation exercises without
+        monkey-patching the private scripted method.
         """
         # Record battlefield at start
         self.state.battlefield_features = self.grid.battlefield_features()
@@ -240,7 +247,7 @@ class BattleLoop:
 
         while not self._battle_over():
             self.turn += 1
-            self._run_turn(general_intent_fn)
+            self._run_turn(general_intent_fn, player_intent_fn)
 
         self.state.turns_played  = self.turn
         self.state.final_weather = self.weather
@@ -363,7 +370,7 @@ class BattleLoop:
     # Turn execution
     # ------------------------------------------------------------------
 
-    def _run_turn(self, general_intent_fn=None) -> None:
+    def _run_turn(self, general_intent_fn=None, player_intent_fn=None) -> None:
         self.physics.clear_log()
 
         # 1. Weather
@@ -384,8 +391,11 @@ class BattleLoop:
         else:
             g_intent = self._scripted_general_intent()
 
-        # 4. Player acts (scripted for simulator)
-        p_intent = self._scripted_player_intent()
+        # 4. Player acts (scripted for simulator, or controlled via callback)
+        if player_intent_fn:
+            p_intent = player_intent_fn(self.state)
+        else:
+            p_intent = self._scripted_player_intent()
 
         # 5. Execute intents → unit actions → physics
         g_combat = self._execute_general_intent(g_intent)

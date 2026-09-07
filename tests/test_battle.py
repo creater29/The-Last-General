@@ -259,6 +259,56 @@ def test_custom_intent_fn():
     assert all(i == "aggressive_push" for i in state.general_intents)
 
 
+def test_custom_player_intent_fn():
+    """Player can be driven by external intent function, symmetric with
+    general_intent_fn (Stage 3 completion exercise prerequisite,
+    2026-09-04) — callback invoked once per turn, returned PlayerIntent
+    values recorded in state.player_intents."""
+    call_count = {"n": 0}
+
+    def always_aggressive_rush(state: BattleState) -> PlayerIntent:
+        call_count["n"] += 1
+        return PlayerIntent.AGGRESSIVE_RUSH
+
+    loop  = make_battle(seed=5)
+    state = loop.run(player_intent_fn=always_aggressive_rush)
+    assert call_count["n"] == state.turns_played
+    assert all(i == "aggressive_rush" for i in state.player_intents)
+
+
+def test_both_intent_fns_together():
+    """Both callbacks can be supplied simultaneously, each driving its
+    own side independently."""
+    def always_defensive(state: BattleState) -> GeneralIntent:
+        return GeneralIntent.DEFENSIVE_HOLD
+
+    def always_defend(state: BattleState) -> PlayerIntent:
+        return PlayerIntent.DEFEND
+
+    loop  = make_battle(seed=5)
+    state = loop.run(
+        general_intent_fn=always_defensive,
+        player_intent_fn=always_defend,
+    )
+    assert all(i == "defensive_hold" for i in state.general_intents)
+    assert all(i == "defend"         for i in state.player_intents)
+
+
+def test_no_player_intent_fn_preserves_existing_behavior():
+    """Omitting player_intent_fn must produce identical behavior to before
+    this parameter existed — same seed, same scripted distribution.
+    Regression check: run the same seed twice, with and without an
+    explicit None, and confirm identical player_intents sequences."""
+    loop_a = make_battle(seed=7)
+    state_a = loop_a.run()
+
+    loop_b = make_battle(seed=7)
+    state_b = loop_b.run(player_intent_fn=None)
+
+    assert state_a.player_intents == state_b.player_intents
+    assert state_a.result == state_b.result
+
+
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
