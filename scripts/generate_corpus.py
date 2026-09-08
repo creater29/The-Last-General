@@ -9,6 +9,12 @@ Usage:
     python scripts/generate_corpus.py --profile balanced
     python scripts/generate_corpus.py --profile anti_flood --max-battles 2000
     python scripts/generate_corpus.py --profile natural --max-battles 500
+    python scripts/generate_corpus.py --profile balanced --seed 20260904 --db /path/to/exercise.db
+
+Pass --seed for fully deterministic corpus generation (same seed -> same
+battles, same terrain events, same resulting doctrines every run). Omit it
+(or pass nothing) for today's unseeded, non-reproducible behavior -
+unchanged default.
 
 After generation, switch back to gameplay with TRAINING_PROFILE="natural".
 """
@@ -97,6 +103,7 @@ def run(
     max_battles: int = 5000,
     report_every: int = 100,
     db_path: Path | None = None,
+    seed: int | None = None,
 ) -> None:
     validate_profile(profile_name)
     profile = PROFILES[profile_name]
@@ -125,7 +132,10 @@ def run(
     current_counts  = get_current_counts(logger, event_keys)
     battles_run     = 0
     start_time      = time.time()
-    rng             = random.Random()   # non-seeded for diversity
+    rng             = random.Random(seed)   # seed=None → unseeded (today's
+                                             # random behavior, unchanged);
+                                             # seed=<int> → fully deterministic
+                                             # corpus generation
 
     if targets:
         print("Starting counts:")
@@ -225,6 +235,13 @@ if __name__ == "__main__":
         default=None,
         help="Path to DB file. Defaults to production DB.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for deterministic corpus generation. Omit for today's "
+             "unseeded, non-reproducible behavior (default).",
+    )
     args = parser.parse_args()
 
     db_path = Path(args.db) if args.db else None
@@ -233,4 +250,5 @@ if __name__ == "__main__":
         max_battles=args.max_battles,
         report_every=args.report_every,
         db_path=db_path,
+        seed=args.seed,
     )
