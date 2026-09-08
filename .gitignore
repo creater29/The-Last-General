@@ -26,6 +26,7 @@ htmlcov/
 
 # SQLite databases (generated data — not source)
 data/episodes/*.db
+data/exercises/*.db
 data/doctrines/
 data/profiles/
 

@@ -201,3 +201,30 @@ but touches a function outside E1's file-by-file contract.
 **When to address:** Alongside W010, in the same consolidation-audit pass,
 or immediately if a caller is ever found relying on `relationship_used`
 being present unconditionally.
+
+### W012 — terrain_tendencies "wins"/"losses" are the General's outcome, not the player's (found 2026-09-04, Stage 3 completion exercise)
+**Component:** `src/brain/player_profiler.py` (`update_profile()`'s
+`terrain_stats` computation) and `src/brain/decision_engine.py`
+(`_player_factor()`'s `TERRAIN_EXPLOIT` reasoning-trace text)
+**Description:** `terrain_tendencies[terrain]["wins"/"losses"]` is computed
+from `ep["_result"]`, which is `BattleState.result` — the **General's**
+win/loss outcome for that episode, not the player's. Despite this, the
+field lives inside player-profiling code, and `_player_factor()`'s
+`TERRAIN_EXPLOIT` boost condition produces a reasoning note phrased as
+*"Player wins only X% on \<terrain\> (\<N\> encounters) — terrain
+exploitation advantageous"* — describing it as the player's win rate.
+Verified during the Stage 3 completion exercise
+(`state/STAGE3_COMPLETION_REPORT.md`): the underlying mechanism works
+correctly and the boost fires appropriately (confirmed via a controlled
+factor comparison — `TERRAIN_EXPLOIT` factor 1.679 with relevant terrain
+visible vs. 1.399 without, same snapshot otherwise), but the note's
+wording would mislead anyone reading a decision trace about whose outcome
+is actually being measured.
+**Fix (not done — logged only, found while validating something else,
+not while implementing it):** Reword the `_player_factor()` reasoning
+note to say "General" rather than "Player", or add a genuinely
+player-perspective terrain win-rate field alongside the existing one if
+that distinct signal is later found useful. Either is a small, isolated
+text/logic change outside the scope of the exercise that found it.
+**When to address:** Low priority — cosmetic/wording accuracy, not a
+behavioral bug. Bundle with W010/W011 during a future consolidation pass.
