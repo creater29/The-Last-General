@@ -193,6 +193,7 @@ def run_cohort_sequence(engine, pp, rm, logger, player_id, seeds,
     results and any pipeline errors encountered."""
     results = []
     pipeline_errors = []
+    total_feedback_increments = 0
     for seed in seeds:
         state, turn_decisions, pipeline_error = run_one_battle(
             engine, player_id, seed, grid_dims=grid_dims,
@@ -204,11 +205,11 @@ def run_cohort_sequence(engine, pp, rm, logger, player_id, seeds,
         logger.log_episode(state)
         pp.update_profile(server_id, player_id)
         rm.update_after_battle(server_id, player_id, state.result)
-        engine.record_battle_outcome(state.result, turn_decisions)
+        total_feedback_increments += engine.record_battle_outcome(state.result, turn_decisions)
 
         results.append(state.result)
 
-    return results, pipeline_errors
+    return results, pipeline_errors, total_feedback_increments
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +237,7 @@ def run_pilot_search():
         def aggressive_fn(state):
             return PlayerIntent.AGGRESSIVE_RUSH
 
-        results, pipeline_errors = run_cohort_sequence(
+        results, pipeline_errors, _increments = run_cohort_sequence(
             engine, pp, rm, logger, "pilot_aggressor", seeds,
             player_intent_fn=aggressive_fn,
         )
@@ -339,16 +340,28 @@ if __name__ == "__main__":
     log(f"Production DB SHA-256 (before): {prod_hash_before}")
 
     phase_a_result = run_phase_a()
-    pilot_result   = run_pilot_search()
+    if phase_a_result["bootstrap_error"] is not None:
+        raise RuntimeError(
+            f"PHASE A BOOTSTRAP FAILED: {phase_a_result['bootstrap_error']}"
+        )
+    if phase_a_result["doctrine_summary"]["total_doctrines"] == 0:
+        raise RuntimeError(
+            "PHASE A BOOTSTRAP PRODUCED NO DOCTRINES — cannot proceed to "
+            "Phase B; the exercise requires a primed, consultable DB."
+        )
+
+    pilot_result = run_pilot_search()
 
     log("\n" + "=" * 70)
     log("PHASE B — 18 measured battles")
     log("=" * 70)
 
     logger, wm, de, pp, rm, engine = make_stack(EXERCISE_DB_PATH)
-    doctrines_before_b = de.doctrine_summary()
+    doctrines_before_b = {d["id"]: d["failure_count"] for d in de.get_doctrines()}
 
     phase_b = {}
+    all_pipeline_errors = []
+    total_feedback_increments = 0
 
     # --- Aggressor ---
     if pilot_result["selected_schedule"] is None:
@@ -357,19 +370,22 @@ if __name__ == "__main__":
     else:
         def aggressive_fn(state):
             return PlayerIntent.AGGRESSIVE_RUSH
-        results, errs = run_cohort_sequence(
+        results, errs, incr = run_cohort_sequence(
             engine, pp, rm, logger, AGGRESSOR_PLAYER_ID,
             pilot_result["selected_schedule"], player_intent_fn=aggressive_fn,
         )
+        all_pipeline_errors.extend(errs)
+        total_feedback_increments += incr
         rel = rm.get_state(SERVER_ID, AGGRESSOR_PLAYER_ID)
         prof = pp.get_profile(SERVER_ID, AGGRESSOR_PLAYER_ID)
         log(f"Aggressor:  {results}  trust={rel.trust_level:.4f}  "
-            f"aggression_idx={prof.get('aggression_index')}  errors={errs}")
+            f"aggression_idx={prof.get('aggression_index')}  errors={errs}  "
+            f"feedback_increments={incr}")
         phase_b["aggressor"] = {
             "status": "measured", "seeds": pilot_result["selected_schedule"],
             "results": results, "pipeline_errors": errs,
             "trust": rel.trust_level, "encounters": rel.encounters,
-            "profile": prof,
+            "profile": prof, "feedback_increments": incr,
         }
 
     # --- Mixed / Neutral ---
@@ -377,36 +393,80 @@ if __name__ == "__main__":
     def mixed_fn(state):
         return next(intent_cycle)
     mixed_seeds = [MIXED_BASE_SEED * 100 + i for i in range(6)]
-    results, errs = run_cohort_sequence(
+    results, errs, incr = run_cohort_sequence(
         engine, pp, rm, logger, MIXED_PLAYER_ID, mixed_seeds, player_intent_fn=mixed_fn,
     )
+    all_pipeline_errors.extend(errs)
+    total_feedback_increments += incr
     rel = rm.get_state(SERVER_ID, MIXED_PLAYER_ID)
     prof = pp.get_profile(SERVER_ID, MIXED_PLAYER_ID)
     log(f"Mixed:      {results}  trust={rel.trust_level:.4f}  "
-        f"aggression_idx={prof.get('aggression_index')}  errors={errs}")
+        f"aggression_idx={prof.get('aggression_index')}  errors={errs}  "
+        f"feedback_increments={incr}")
     phase_b["mixed"] = {
         "status": "measured", "seeds": mixed_seeds, "results": results,
         "pipeline_errors": errs, "trust": rel.trust_level,
-        "profile": prof,
+        "profile": prof, "feedback_increments": incr,
     }
 
     # --- Terrain-exposure ---
     terrain_seeds = [TERRAIN_BASE_SEED * 100 + i for i in range(6)]
-    results, errs = run_cohort_sequence(
+    results, errs, incr = run_cohort_sequence(
         engine, pp, rm, logger, TERRAIN_PLAYER_ID, terrain_seeds,
         grid_dims=(40, 40), player_intent_fn=None,
     )
+    all_pipeline_errors.extend(errs)
+    total_feedback_increments += incr
     rel = rm.get_state(SERVER_ID, TERRAIN_PLAYER_ID)
     prof = pp.get_profile(SERVER_ID, TERRAIN_PLAYER_ID)
     log(f"Terrain:    {results}  trust={rel.trust_level:.4f}  "
-        f"terrain_tendencies={prof.get('terrain_tendencies')}  errors={errs}")
+        f"terrain_tendencies={prof.get('terrain_tendencies')}  errors={errs}  "
+        f"feedback_increments={incr}")
     phase_b["terrain"] = {
         "status": "measured", "seeds": terrain_seeds, "results": results,
-        "pipeline_errors": errs, "profile": prof,
+        "pipeline_errors": errs, "profile": prof, "feedback_increments": incr,
     }
 
-    doctrines_after_b = de.doctrine_summary()
+    if all_pipeline_errors:
+        raise RuntimeError(
+            f"PHASE B PIPELINE ERRORS DETECTED (decide() raised): "
+            f"{all_pipeline_errors}"
+        )
+
+    # --- Doctrine feedback loop verification: assert real failure_count
+    # increments, not just that the doctrine table's shape stayed intact ---
+    doctrines_after_b = {d["id"]: d["failure_count"] for d in de.get_doctrines()}
+    all_doc_ids = set(doctrines_before_b) | set(doctrines_after_b)
+    actual_failure_delta = sum(
+        doctrines_after_b.get(d, 0) - doctrines_before_b.get(d, 0)
+        for d in all_doc_ids
+    )
+    log(f"\nDoctrine failure_count deltas: "
+        f"{ {d: doctrines_after_b.get(d,0) - doctrines_before_b.get(d,0) for d in all_doc_ids if doctrines_after_b.get(d,0) != doctrines_before_b.get(d,0)} }")
+    log(f"Sum of failure_count deltas:        {actual_failure_delta}")
+    log(f"Sum of record_battle_outcome() returns: {total_feedback_increments}")
+    if actual_failure_delta != total_feedback_increments:
+        raise RuntimeError(
+            f"DOCTRINE FEEDBACK MISMATCH: record_battle_outcome() reported "
+            f"{total_feedback_increments} increments applied, but the "
+            f"doctrine table's failure_count only changed by "
+            f"{actual_failure_delta}. The feedback loop is not behaving as "
+            f"claimed."
+        )
+    if total_feedback_increments == 0:
+        log("\n  WARNING: 0 doctrine feedback increments were applied across "
+            "all 18 battles. Doctrine feedback loop presence cannot be "
+            "confirmed by this run (informational, not a hard failure — "
+            "0 increments is possible if no loss battle ever consulted a "
+            "doctrine, though unlikely given the primed DB).")
+    else:
+        log(f"  CONFIRMED: {total_feedback_increments} real failure_count "
+            f"increments applied and verified against the doctrine table "
+            f"directly, not merely inferred from table shape.")
+
+    doctrine_summary_after_b = de.doctrine_summary()
     logger.close()
+
 
     # --- Draw control (always run) ---
     log("\n" + "=" * 70)
@@ -430,6 +490,33 @@ if __name__ == "__main__":
     else:
         factor_comparison = None
         log("  Skipped — Aggressor cohort inconclusive.")
+
+    # --- Terrain-specific controlled check (post-W012-fix) ---
+    log("\n" + "=" * 70)
+    log("TERRAIN FACTOR CHECK (post-W012-fix, player-perspective win/loss)")
+    log("=" * 70)
+    t_logger, t_wm, t_de, t_pp, t_rm, _t_engine = make_stack(EXERCISE_DB_PATH)
+    terrain_profile = t_pp.get_profile(SERVER_ID, TERRAIN_PLAYER_ID)
+    log(f"terrain_tendencies (player-perspective): {terrain_profile.get('terrain_tendencies')}")
+    k_river = CommanderKnowledge(
+        server_id=SERVER_ID, player_id=TERRAIN_PLAYER_ID, turn=5, weather="clear",
+        battlefield_features={}, known_enemy_presence={}, known_friendly_state={},
+        visible_terrain=["river"], visible_events=[], known_enemy_composition=None,
+    )
+    k_none = CommanderKnowledge(
+        server_id=SERVER_ID, player_id=TERRAIN_PLAYER_ID, turn=5, weather="clear",
+        battlefield_features={}, known_enemy_presence={}, known_friendly_state={},
+        visible_terrain=[], visible_events=[], known_enemy_composition=None,
+    )
+    terrain_factor_river, terrain_notes_river = _player_factor(
+        "TERRAIN_EXPLOIT", terrain_profile, k_river
+    )
+    terrain_factor_none, terrain_notes_none = _player_factor(
+        "TERRAIN_EXPLOIT", terrain_profile, k_none
+    )
+    log(f"TERRAIN_EXPLOIT factor (river visible):    {terrain_factor_river}  notes={terrain_notes_river}")
+    log(f"TERRAIN_EXPLOIT factor (no relevant terrain): {terrain_factor_none}  notes={terrain_notes_none}")
+    t_logger.close()
 
     # --- Isolation check ---
     prod_hash_after = sha256_of(DEFAULT_DB_PATH)

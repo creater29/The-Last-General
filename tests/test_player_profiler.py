@@ -507,6 +507,9 @@ def test_terrain_tendencies_structure():
 
 
 def test_terrain_tendencies_counts_wins_and_losses():
+    """wins/losses are from the PLAYER's perspective, not the General's
+    (W012 fix, 2026-09-04): 2 General-win episodes -> 2 PLAYER losses;
+    1 General-loss episode -> 1 PLAYER win."""
     logger = temp_logger()
     river_event = [{"terrain_at_site": "river", "event_type": "flood",
                     "triggered_by_type": "weather"}]
@@ -518,8 +521,41 @@ def test_terrain_tendencies_counts_wins_and_losses():
     p = pp.get_profile("server_1", "player_A")
     river = p["terrain_tendencies"].get("river", {})
     assert river["count"]  == 3
-    assert river["wins"]   == 2
-    assert river["losses"] == 1
+    assert river["wins"]   == 1  # 1 General-loss episode -> player won once
+    assert river["losses"] == 2  # 2 General-win episodes -> player lost twice
+    logger.close()
+
+
+def test_terrain_tendencies_known_general_win_episode_records_player_loss():
+    """Regression test (W012): a single, unambiguous General-win episode
+    on a given terrain must record a PLAYER loss on that terrain, not a
+    player win."""
+    logger = temp_logger()
+    forest_event = [{"terrain_at_site": "forest", "event_type": "tree_fall",
+                      "triggered_by_type": "cavalry"}]
+    seed_episode(logger, "player_A", "win", terrain_events=forest_event, episode_id="general_won")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    forest = p["terrain_tendencies"]["forest"]
+    assert forest["wins"]   == 0
+    assert forest["losses"] == 1
+    logger.close()
+
+
+def test_terrain_tendencies_known_general_loss_episode_records_player_win():
+    """Regression test (W012): a single, unambiguous General-loss episode
+    on a given terrain must record a PLAYER win on that terrain."""
+    logger = temp_logger()
+    forest_event = [{"terrain_at_site": "forest", "event_type": "tree_fall",
+                      "triggered_by_type": "cavalry"}]
+    seed_episode(logger, "player_A", "loss", terrain_events=forest_event, episode_id="general_lost")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    forest = p["terrain_tendencies"]["forest"]
+    assert forest["wins"]   == 1
+    assert forest["losses"] == 0
     logger.close()
 
 

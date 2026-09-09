@@ -1,24 +1,56 @@
 # Stage 3 Completion — Multi-Player Live Intelligence Exercise Report
 
-**Date:** 2026-09-04
+**Date:** 2026-09-04 (corrected after supervisor review found a real
+behavioral bug in the first run — see "W012 correction" below)
 **Script:** `scripts/stage3_completion_exercise.py`
 **Exercise DB:** `data/exercises/stage3_completion_2026-09-04.db` (gitignored, generated data)
-**Reproducibility:** confirmed — two fully independent end-to-end runs
-produced byte-identical results (all battle outcomes, trust values,
-aggression indices, terrain tendencies, controlled factor comparisons,
-production DB hash); the only observed difference was wall-clock timing
-noise.
+**Reproducibility:** confirmed — repeated end-to-end runs produce
+identical results (all battle outcomes, trust values, aggression indices,
+terrain tendencies, controlled factor comparisons, production DB hash);
+the only observed difference across runs is wall-clock timing noise.
+
+---
+
+## W012 correction — what changed since the first version of this report
+
+The first version of this report claimed a verified `TERRAIN_EXPLOIT`
+boost (factor 1.679 vs 1.399) as evidence of terrain-driven decision
+influence. Supervisor review correctly identified this as **invalid**:
+`player_profiler.py`'s `terrain_tendencies["wins"/"losses"]` was computed
+from `BattleState.result`, which is the **General's** outcome, not the
+player's. In the terrain-exposure cohort, the General lost all 6
+battles — meaning the *player* won every encounter — but the stored data
+showed `wins: 0`, and `_player_factor()` read that as the player's win
+rate, boosting `TERRAIN_EXPLOIT` under the belief the player was weak on
+that terrain when the opposite was true. This was a real decision-quality
+bug (now W012, resolved), not a wording issue as I originally
+mischaracterized it.
+
+**Fix:** `player_profiler.py`'s terrain computation now correctly
+increments `"wins"` on a General *loss* (player won) and `"losses"` on a
+General *win* (player lost). Two explicit regression tests were added
+using single, unambiguous known-outcome episodes. The exercise was
+rerun in full after the fix.
+
+**Corrected result:** with the bug fixed, the terrain-exposure cohort's
+real data shows the player won 100% of its terrain encounters (matching
+the fact that the General lost all 6 of those battles). Post-fix,
+`TERRAIN_EXPLOIT` **correctly does not boost** for this dataset — the
+factor is identical (1.399) whether or not relevant terrain is visible.
+This is the honest outcome: the exercise's job is to find the truth about
+whether the mechanism works, not to manufacture a positive result. The
+mechanism itself is now verified correct, even though this particular
+dataset doesn't trigger it.
 
 ---
 
 ## Isolation proof
 
 ```
-Production DB SHA-256 (before): e65cbf1f7eb191538746141296455e6c096b8e429cac00884ab8f16cba3b7ffc
-Production DB SHA-256 (after):  e65cbf1f7eb191538746141296455e6c096b8e429cac00884ab8f16cba3b7ffc
+Production DB SHA-256 (before): d44e5f9a749907f382842446d89cab39a83dd28d1173623542c8c97e7b3adda7
+Production DB SHA-256 (after):  d44e5f9a749907f382842446d89cab39a83dd28d1173623542c8c97e7b3adda7
 Production DB unchanged: True
 ```
-Full-file SHA-256 checksum, not mtime/size. The exercise's `EpisodeLogger`/`WorldModel`/`DoctrineExtractor`/`PlayerProfiler`/`RelationshipManager`/`DecisionEngine` stack was constructed exclusively against `data/exercises/stage3_completion_2026-09-04.db` throughout — never `DEFAULT_DB_PATH`.
 
 ---
 
@@ -26,8 +58,7 @@ Full-file SHA-256 checksum, not mtime/size. The exercise's `EpisodeLogger`/`Worl
 
 - `generate_corpus.run(profile_name="balanced", max_battles=600, seed=20260904, db_path=<exercise DB>)`
 - Player ID: `curriculum_balanced` — never reused in Phase B
-- Bootstrap completed without exceptions: **True**
-- 600 episodes generated → `world_model.update_from_observations()` → `doctrine_extractor.extract_doctrines()`
+- Bootstrap completed without exceptions: **True** (script now hard-fails via `RuntimeError` if this is False or if 0 doctrines are promoted — not merely logged)
 
 **Doctrine baseline:**
 ```
@@ -35,28 +66,26 @@ total_doctrines: 3
 effects_covered: [ice_break, tree_fall, wall_collapse]
 terrain_types:   [forest, frozen_lake, wall]
 avg_confidence:  0.9925
-min_confidence:  0.9804
 principles:      Cavalry combat in forests may fell trees.
                   Siege weapons can collapse fortifications.
                   Heavy cavalry on frozen lakes risks ice breakage.
 ```
-Non-empty, high-confidence, consultable — verified before Phase B began.
 
 ---
 
 ## Bounded pilot search (Aggressor low-trust schedule)
 
-Search range: `base_seed ∈ {1, 2, 3, 4, 5}`, each producing a 6-battle schedule `[base_seed*100+i for i in range(6)]`, tested against a throwaway copy of the primed exercise DB, discarded after testing (never counted toward the 18 measured battles).
+Search range: `base_seed ∈ {1, 2, 3, 4, 5}`. All 5 candidates tested and recorded:
 
 | base_seed | results | trust | passes (< -0.2)? |
 |---|---|---|---|
-| 1 | loss,loss,draw,loss,draw,loss | -0.2000 | No (exactly at boundary, correctly excluded — strict `<`) |
+| 1 | loss,loss,draw,loss,draw,loss | -0.2000 | No (boundary, correctly excluded) |
 | 2 | loss×6 | **-0.3000** | **Yes — selected** |
-| 3 | loss×6 | -0.3000 | (not reached, 2 already selected) |
+| 3 | loss×6 | -0.3000 | (not reached) |
 | 4 | loss,loss,loss,loss,loss,draw | -0.2500 | (not reached) |
 | 5 | loss,loss,win,loss,draw,loss | -0.1800 | No |
 
-**Selected schedule:** `[200, 201, 202, 203, 204, 205]`, trust = **-0.3000**. Note base_seed=5 included a General *win* — confirming the search is a genuine test, not a rigged outcome.
+Selected schedule: `[200, 201, 202, 203, 204, 205]`.
 
 ---
 
@@ -66,73 +95,89 @@ Search range: `base_seed ∈ {1, 2, 3, 4, 5}`, each producing a 6-battle schedul
 |---|---|---|---|---|---|
 | Aggressor | `exercise_aggressor` | loss×6 | -0.3000 | aggression_index = **1.0** | 0 |
 | Mixed/Neutral | `exercise_mixed` | loss×6 | -0.3000 | aggression_index = **0.5722** | 0 |
-| Terrain-exposure | `exercise_terrain` | loss×6 | -0.3000 | forest count=6, river count=3, frozen_lake count=2 | 0 |
+| Terrain-exposure | `exercise_terrain` | loss×6 | -0.3000 | forest: {count:6, wins:6, losses:0}; river: {count:3, wins:3, losses:0}; frozen_lake: {count:2, wins:2, losses:0} (**post-W012-fix, player-perspective**) | 0 |
 
-The real Phase B Aggressor run **exactly reproduced** the pilot's result (same seeds, same DB state, same outcome) — internal consistency confirmed, not merely re-asserted.
+The real Phase B Aggressor run **exactly reproduced** the pilot's result.
 
-**Draw control (component-level, always run, independent of the 18):**
+**Closure fix — pipeline errors now hard-fail:** the exercise script raises `RuntimeError` if any of the 18 battles' `decide()` calls raise, rather than only logging. All 18 battles ran clean (0 errors), so this gate did not trip, but it is now a real gate, not a report-only field.
+
+**Draw control (component-level, always run):**
 ```
 {'trust_before': 0.0, 'encounters_before': 0, 'trust_after': 0.0, 'encounters_after': 1}
 ```
-A single "draw" outcome does not move trust away from neutral — confirmed directly, not inferred.
+
+---
+
+## Doctrine feedback loop — closure fix (real failure_count assertion, not table-shape inference)
+
+Previously the report only claimed doctrine consultation/decay "still worked" by checking the doctrine table's shape stayed intact. Per required correction, the script now:
+1. Snapshots `failure_count` for every doctrine **before** Phase B
+2. Sums `record_battle_outcome()`'s return value across all 18 battles
+3. Snapshots `failure_count` **after** Phase B
+4. **Asserts** the actual `failure_count` delta equals the sum of reported increments — hard failure if they disagree
+
+**Result:**
+```
+Doctrine failure_count deltas: {
+  'doctrine_forest_cavalry_tree_fall':     +445,
+  'doctrine_frozen_lake_cavalry_ice_break': +59,
+}
+Sum of failure_count deltas:            504
+Sum of record_battle_outcome() returns: 504
+```
+Exact match, verified directly against the doctrine table, not inferred. Candidate B's feedback loop is confirmed working at Stage 3 exercise volume.
 
 ---
 
 ## Six-question assessment
 
 ### 1. Pipeline proven?
-**Yes.** 0 pipeline errors across all 18 measured battles (bootstrap tracked separately — it uses `loop.run()` with no `general_intent_fn`, so it never calls `decide()` and is not part of this claim). Every turn across all 18 battles produced a traced decision.
+**Yes.** 0 pipeline errors across all 18 measured battles, now a hard gate rather than a soft report. Bootstrap tracked and gated separately (it doesn't call `decide()`).
 
 ### 2. Player profiles differentiated?
-**Yes**, on the metrics that don't depend on army composition (all three cohorts share identical default army composition, so `preferred_units` was correctly *not* used as a differentiation claim, per the required correction):
-- **Aggression index:** Aggressor = 1.0, Mixed = 0.5722 — materially distinct, by construction (Mixed cycles all 7 real `PlayerIntent` values evenly; Aggressor only ever plays `AGGRESSIVE_RUSH`).
-- **Intent history:** Aggressor's `intent_counts` is 100% `aggressive_rush`; Mixed's is an even 7-way split.
-- **Terrain tendencies:** only the Terrain-exposure cohort accumulated `forest`/`river`/`frozen_lake` encounter counts ≥3 — Aggressor and Mixed cohorts ran on the 100×100 grid and did not.
+**Yes**, on metrics independent of army composition (all cohorts share default army composition — `preferred_units` correctly not used as a differentiation claim): aggression_index (1.0 vs 0.5722), intent history, and terrain accumulation presence.
 
 ### 3. Profile factor influenced scores? (Controlled factor evidence)
-**Yes — verified with the same fixed `CommanderKnowledge` snapshot, cold vs. accumulated Aggressor state:**
+**Yes**, same fixed `CommanderKnowledge` snapshot, cold vs. accumulated Aggressor state:
 
-| Intent | Cold `_player_factor` | Real `_player_factor` | Reasoning (real) |
-|---|---|---|---|
-| DEFENSIVE_HOLD | 1.0 (no profile) | **1.639** | "Player aggression 1.00 — DEFENSIVE_HOLD counters aggressive rush." + adaptability note |
-| AGGRESSIVE_PUSH | 1.0 (no profile) | **0.72** | "Player aggression 1.00 — head-on attack risky against aggressive opponent." |
+| Intent | Cold `_player_factor` | Real `_player_factor` |
+|---|---|---|
+| DEFENSIVE_HOLD | 1.0 | **1.639** |
+| AGGRESSIVE_PUSH | 1.0 | **0.72** |
 
-Same snapshot, same weather, same everything — only the profile differs. The factor changed, the reasoning trace names why, and the result is deterministic (re-run twice, identical).
+Both with explanatory reasoning notes, deterministic under an otherwise identical snapshot.
 
-**Additionally verified for the Terrain-exposure cohort** (river visible in `visible_terrain`):
-```
-TERRAIN_EXPLOIT factor with river visible:    1.679
-TERRAIN_EXPLOIT factor with no relevant terrain: 1.399
-```
-Both `count >= 3` (river count=3) and `win_rate < 0.4` (0/3 = 0.0) were required and both were met — this is the one case where I can legitimately claim terrain-driven decision influence, verified directly, not assumed from the aggregation numbers alone.
+**Terrain factor, corrected:** `TERRAIN_EXPLOIT` = 1.399 regardless of whether relevant terrain is visible, for this cohort's actual (now-correct) data — **no terrain-driven influence claimed**, because the player genuinely dominated every terrain encounter in this dataset (win_rate=1.0, not <0.4). This is a negative result, reported honestly rather than omitted.
 
 ### 4. Relationship state influenced scores? (Controlled factor evidence)
 **Yes:**
 
-| Intent | Cold `_relationship_factor` | Real (trust=-0.30) | Reasoning |
-|---|---|---|---|
-| DEFENSIVE_HOLD | 1.0 | **1.045** | "General is cautious; defensive posture favoured (factor=1.0450)." |
-| AGGRESSIVE_PUSH | 1.0 | **0.955** | "General is wary; high-commitment intent penalised (commitment_mod=0.955)." |
+| Intent | Cold `_relationship_factor` | Real (trust=-0.30) |
+|---|---|---|
+| DEFENSIVE_HOLD | 1.0 | **1.045** |
+| AGGRESSIVE_PUSH | 1.0 | **0.955** |
 
 Draw control confirms the mechanism doesn't spuriously move trust on a neutral outcome (0.0 → 0.0).
 
 ### 5. Doctrine feedback still correct?
-Doctrine baseline (3 doctrines, all confidences ≥0.98) was unchanged in shape across Phase B's 18 battles plus the bootstrap's 600 — no new doctrines were promoted or corrupted, consultation continued to fire correctly (`doctrines_consulted` non-empty on relevant turns, confirmed via the same reasoning-trace mechanism validated in Candidate E). No regression in Candidate B's feedback loop.
+**Yes — verified directly, not inferred from table shape.** 504 real `failure_count` increments applied and confirmed to match `record_battle_outcome()`'s reported total exactly.
 
 ### 6. Evidence that D002 or D007 is genuinely needed?
-
-- **D002 (time-based doctrine confidence staleness): `insufficient evidence`.** 18 battles plus a 600-episode bootstrap run in a single session cannot demonstrate decay over real elapsed time — that's what D002 is actually about. Nothing in this exercise bears on it either way.
-- **D007 (counter-doctrine population): `insufficient evidence`.** No repeated counter-doctrine-worthy pattern (the General being predictably countered by a specific repeated player strategy across many encounters) surfaced in 18 battles. The `counter_doctrines` table remains empty; this exercise doesn't provide grounds to prioritize building it now.
-
----
-
-## One finding logged, not fixed (out of exercise scope)
-
-`player_profiler.py`'s `terrain_tendencies["wins"/"losses"]` fields are computed from `ep["_result"]`, which is the **General's** win/loss outcome — not the player's, despite living inside player-profiling code and being described in `_player_factor()`'s reasoning-trace text as *"Player wins only X%..."*. The note text is mislabeled; the underlying mechanism works correctly (verified above), but the wording could mislead anyone reading a decision trace. Recommend logging as a new `KNOWN_ISSUES.md` entry for a future documentation/wording fix — not fixed here, to avoid scope creep into decision-engine text mid-exercise.
+- **D002 (time-based staleness): `insufficient evidence`.** One session's worth of battles cannot demonstrate decay over real elapsed time.
+- **D007 (counter-doctrine population): `insufficient evidence`.** No repeated counter-doctrine-worthy pattern surfaced in 18 battles.
 
 ---
 
-## Files produced this exercise
-- `scripts/stage3_completion_exercise.py` (new)
-- `data/exercises/stage3_completion_2026-09-04.db` (generated, gitignored)
-- `.gitignore` (added `data/exercises/*.db`)
+## Findings logged during this exercise
+
+- **W012 (RESOLVED):** `terrain_tendencies` win/loss inversion — real bug, fixed, regression-tested, exercise rerun with corrected result reported honestly above.
+- **W013 (logged, not fixed):** `preferred_units["wins"]` has the identical General-vs-player perspective pattern, but is currently **dormant** — not consumed anywhere in `decision_engine.py` — so it's a latent defect, not an active one. Flagged for whenever `preferred_units` is first wired into a decision factor.
+
+---
+
+## Files touched
+- `src/brain/player_profiler.py` (W012 fix)
+- `tests/test_player_profiler.py` (corrected + 2 new regression tests)
+- `scripts/stage3_completion_exercise.py` (hard-fail gates, real failure_count assertion, corrected terrain check)
+- `state/KNOWN_ISSUES.md` (W012 resolved, W013 logged)
+- `state/STAGE3_COMPLETION_REPORT.md` (this file, rewritten)

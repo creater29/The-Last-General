@@ -202,29 +202,64 @@ but touches a function outside E1's file-by-file contract.
 or immediately if a caller is ever found relying on `relationship_used`
 being present unconditionally.
 
-### W012 — terrain_tendencies "wins"/"losses" are the General's outcome, not the player's (found 2026-09-04, Stage 3 completion exercise)
+### W012 — RESOLVED 2026-09-04 — terrain_tendencies "wins"/"losses" were computed from the General's outcome, not the player's
 **Component:** `src/brain/player_profiler.py` (`update_profile()`'s
-`terrain_stats` computation) and `src/brain/decision_engine.py`
-(`_player_factor()`'s `TERRAIN_EXPLOIT` reasoning-trace text)
-**Description:** `terrain_tendencies[terrain]["wins"/"losses"]` is computed
-from `ep["_result"]`, which is `BattleState.result` — the **General's**
-win/loss outcome for that episode, not the player's. Despite this, the
-field lives inside player-profiling code, and `_player_factor()`'s
-`TERRAIN_EXPLOIT` boost condition produces a reasoning note phrased as
-*"Player wins only X% on \<terrain\> (\<N\> encounters) — terrain
-exploitation advantageous"* — describing it as the player's win rate.
-Verified during the Stage 3 completion exercise
-(`state/STAGE3_COMPLETION_REPORT.md`): the underlying mechanism works
-correctly and the boost fires appropriately (confirmed via a controlled
-factor comparison — `TERRAIN_EXPLOIT` factor 1.679 with relevant terrain
-visible vs. 1.399 without, same snapshot otherwise), but the note's
-wording would mislead anyone reading a decision trace about whose outcome
-is actually being measured.
-**Fix (not done — logged only, found while validating something else,
-not while implementing it):** Reword the `_player_factor()` reasoning
-note to say "General" rather than "Player", or add a genuinely
-player-perspective terrain win-rate field alongside the existing one if
-that distinct signal is later found useful. Either is a small, isolated
-text/logic change outside the scope of the exercise that found it.
-**When to address:** Low priority — cosmetic/wording accuracy, not a
-behavioral bug. Bundle with W010/W011 during a future consolidation pass.
+`terrain_stats` computation)
+**Description:** `terrain_tendencies[terrain]["wins"/"losses"]` was
+computed directly from `ep["_result"]`, which is `BattleState.result` —
+the **General's** win/loss outcome, not the player's. `_player_factor()`'s
+`TERRAIN_EXPLOIT` boost reads this value as the player's win rate
+(reasoning note: *"Player wins only X% on \<terrain\>..."*) and boosts
+`TERRAIN_EXPLOIT` when that rate is low — i.e., when the General should
+exploit a terrain the player struggles on.
+**This was NOT cosmetic — it was a live decision-quality bug**, correctly
+identified as such during supervisor review of the Stage 3 completion
+exercise. Original report claimed the terrain factor was verified working
+(`TERRAIN_EXPLOIT` 1.679 vs 1.399) using a dataset where the General had
+in fact lost every battle on that terrain — meaning the *player* had won
+every encounter, the exact opposite of what a "boost because the player
+is weak here" signal should represent. With the inverted stored data, the
+General would have been encouraged to exploit terrain where the player
+was actually strongest.
+**Fix:** `player_profiler.py`'s `terrain_stats` computation now increments
+`"wins"` when `ep["_result"] == "loss"` (General lost -> player won) and
+`"losses"` when `ep["_result"] == "win"` (General won -> player lost) —
+inverted at the source, so `_player_factor()`'s existing logic and its
+existing tests (which already encoded the *correct* intended semantics
+with directly-constructed synthetic dicts) needed no changes.
+**Regression tests added:** `test_terrain_tendencies_known_general_win_episode_records_player_loss`,
+`test_terrain_tendencies_known_general_loss_episode_records_player_win` —
+single-episode, unambiguous cases pinning the correct direction.
+`test_terrain_tendencies_counts_wins_and_losses` (which previously pinned
+the *wrong* direction as correct — the same failure pattern as the
+AGGRESSIVE_INTENTS vocabulary bug earlier this session, a test asserting
+buggy behavior is what let both bugs survive) corrected to match.
+**Stage 3 completion exercise rerun after the fix:** the terrain-exposure
+cohort's real data showed the player winning 100% of its terrain
+encounters (General lost all 6 terrain-cohort battles) — so post-fix,
+`TERRAIN_EXPLOIT` correctly does NOT boost for this dataset (factor
+identical, 1.399, with or without relevant terrain visible). This is the
+honest, corrected result — the exercise's job was to find the truth, not
+manufacture a positive result. See `state/STAGE3_COMPLETION_REPORT.md`
+for the corrected report.
+**Commits:** bugfix + tests in the same commit as the corrected exercise
+rerun, 2026-09-04.
+
+### W013 — preferred_units "wins" has the same General-vs-player perspective pattern as W012, but is currently dormant (found 2026-09-04, alongside the W012 fix)
+**Component:** `src/brain/player_profiler.py` (`update_profile()`'s
+`unit_usage` computation)
+**Description:** `unit_usage[unit_type]["wins"]` is computed via
+`won = ep["_result"] == "win"` — the same General-perspective-used-as-
+player-perspective pattern W012 had. Checked whether this is currently a
+live decision-quality bug the way W012 was: `grep -n "preferred_units"
+src/brain/decision_engine.py` returns **no matches** — `preferred_units`
+is not consumed by `decide()` or any factor function anywhere today. So
+this is dormant data with the same latent defect, not an active one.
+**Fix (not done — logged only):** apply the same inversion W012 got
+(`wins` increments on `ep["_result"] == "loss"`, not `"win"`) whenever
+`preferred_units` is first wired into a decision factor — fixing it
+before that point is speculative since nothing consumes it yet, and
+fixing it without a consumer to test against would be unverifiable.
+**When to address:** Before `preferred_units` is ever read by
+`decision_engine.py` for the first time — flag this issue explicitly at
+that point, don't let it repeat the same silent-bug pattern.

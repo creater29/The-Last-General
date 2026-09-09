@@ -22,6 +22,10 @@ Formula decisions:
 
   preferred_units    = {unit_type: {used: N, wins: W}}
   terrain_tendencies = {terrain: {count: N, wins: W, losses: L}}
+      wins/losses are from the PLAYER's perspective (inverted from
+      ep["_result"], which is General-perspective — see the inline
+      comment at the computation site for the full explanation, and
+      KNOWN_ISSUES.md W012 for the bug this corrected on 2026-09-04).
 """
 
 from __future__ import annotations
@@ -130,6 +134,14 @@ class PlayerProfiler:
         # ---- Preferred units ----
         # {unit_type: {used: N, wins: W}}
         # Graceful: old episodes without unit_types return {} safely.
+        #
+        # NOTE (found alongside the terrain_tendencies fix, 2026-09-04,
+        # W013): "wins" here has the same General-vs-player perspective
+        # pattern terrain_tendencies had (won = ep["_result"] == "win" is
+        # the General's result, not the player's). NOT fixed here —
+        # unlike terrain_tendencies, this field is not currently consumed
+        # anywhere in decision_engine.py, so it is dormant, not a live
+        # decision-quality bug. Logged in KNOWN_ISSUES.md as W013.
         unit_usage: Dict[str, Dict[str, int]] = {}
         for ep in episodes:
             unit_types = (
@@ -146,10 +158,22 @@ class PlayerProfiler:
         # ---- Terrain tendencies ----
         # {terrain: {count: N, wins: W, losses: L}}
         # One count per terrain type per episode (not per event).
+        #
+        # wins/losses are from the PLAYER's perspective, not the General's.
+        # ep["_result"] is BattleState.result, which is General-perspective
+        # (see simulator/battle.py _determine_result()) — so a General
+        # "loss" means the player WON that encounter, and a General "win"
+        # means the player LOST it. Bug found 2026-09-04 (Stage 3
+        # completion exercise, W012): this used to increment "wins" on
+        # ep["_result"] == "win" directly, silently recording the
+        # General's win rate as though it were the player's — inverted.
+        # _player_factor()'s TERRAIN_EXPLOIT check reads this value
+        # expecting the player's win rate ("Player wins only X%..."), so
+        # the inversion was a live decision-quality bug, not cosmetic.
         terrain_stats: Dict[str, Dict[str, int]] = {}
         for ep in episodes:
             seen = set()
-            result = ep["_result"]
+            general_result = ep["_result"]
             for event in ep.get("terrain_events", []):
                 terrain = event.get("terrain_at_site", "")
                 if not terrain or terrain in seen:
@@ -158,9 +182,9 @@ class PlayerProfiler:
                 if terrain not in terrain_stats:
                     terrain_stats[terrain] = {"count": 0, "wins": 0, "losses": 0}
                 terrain_stats[terrain]["count"] += 1
-                if result == "win":
+                if general_result == "loss":     # General lost -> player won
                     terrain_stats[terrain]["wins"]   += 1
-                elif result == "loss":
+                elif general_result == "win":     # General won -> player lost
                     terrain_stats[terrain]["losses"] += 1
 
         # ---- Raw evidence blob ----
