@@ -18,14 +18,20 @@ Design constraints:
 Formula decisions:
   aggression_index  = aggressive_intents / total_intents (across all battles)
   adaptability_score = adaptations / max(1, loss_count)
-      where adaptation = dominant_intent changed after a loss
+      where adaptation = dominant_intent changed after a PLAYER loss, and
+      loss_count is the PLAYER's loss count. (Corrected 2026-09-04, W013 —
+      previously used the General's loss/win directly; see player_won()'s
+      docstring in this file.)
 
   preferred_units    = {unit_type: {used: N, wins: W}}
   terrain_tendencies = {terrain: {count: N, wins: W, losses: L}}
-      wins/losses are from the PLAYER's perspective (inverted from
-      ep["_result"], which is General-perspective — see the inline
-      comment at the computation site for the full explanation, and
-      KNOWN_ISSUES.md W012 for the bug this corrected on 2026-09-04).
+      All wins/losses fields in this module (win_count/loss_count,
+      preferred_units, terrain_tendencies) and adaptability_score are
+      computed from the PLAYER's perspective via the canonical
+      player_won()/player_lost() helpers defined once below — never
+      from ep["_result"] directly, which is General-perspective. See
+      KNOWN_ISSUES.md W012/W013 for the bugs this correction fixed on
+      2026-09-04.
 """
 
 from __future__ import annotations
@@ -59,6 +65,31 @@ def _dominant_intent(intents: List[str]) -> str:
     if not intents:
         return ""
     return Counter(intents).most_common(1)[0][0]
+
+
+def player_won(ep: dict) -> bool:
+    """
+    True iff the PLAYER won this episode.
+
+    ep["_result"] is BattleState.result, which is General-perspective
+    (see simulator/battle.py _determine_result()). Every derived field
+    in this module must be computed from the PLAYER's perspective, not
+    the General's — this is the single, canonical definition point for
+    that inversion, used consistently by every computation below.
+
+    Found 2026-09-04 (Stage 3 completion exercise): terrain_tendencies
+    (W012, fixed), then adaptability_score, win_count/loss_count, and
+    preferred_units["wins"] (W013, initially misclassified as dormant —
+    corrected: adaptability_score IS live in _player_factor(), so this
+    was a real decision-quality defect, not cosmetic) were all found
+    using ep["_result"] directly as though it were player-perspective.
+    """
+    return ep["_result"] == "loss"   # General lost -> player won
+
+
+def player_lost(ep: dict) -> bool:
+    """True iff the PLAYER lost this episode. See player_won()."""
+    return ep["_result"] == "win"    # General won -> player lost
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +128,13 @@ class PlayerProfiler:
             return {}   # No data — nothing to profile yet
 
         # ---- Basic counters ----
+        # win_count/loss_count are the PLAYER's, via player_won()/player_lost()
+        # (W013 fix, 2026-09-04) — previously used ep["_result"] directly,
+        # which is General-perspective, silently storing the General's
+        # record as though it were the player's.
         total    = len(episodes)
-        wins     = sum(1 for e in episodes if e["_result"] == "win")
-        losses   = sum(1 for e in episodes if e["_result"] == "loss")
+        wins     = sum(1 for e in episodes if player_won(e))
+        losses   = sum(1 for e in episodes if player_lost(e))
         draws    = total - wins - losses
         first_ts = episodes[0]["_timestamp"]
         last_ts  = episodes[-1]["_timestamp"]
@@ -118,7 +153,15 @@ class PlayerProfiler:
         aggression_idx = aggressive_n / max(1, total_intents)
 
         # ---- Adaptability score ----
-        # Count times player changed dominant intent after a loss.
+        # Count times player changed dominant intent after a PLAYER loss
+        # (W013 fix, 2026-09-04: this used episodes[i]["_result"] == "loss"
+        # directly, which is a General loss — meaning the player WON that
+        # battle. adaptability_score is live in _player_factor()'s
+        # COUNTER_AGGRESSIVE boost condition, so this was a real
+        # decision-quality defect, not dormant: the system could label a
+        # player "unadaptable after losses" based on battles the player
+        # actually won, and use that wrong score to boost counter-
+        # aggressive decisions.)
         adaptations = 0
         strategy_switches = 0
         for i in range(len(episodes) - 1):
@@ -126,7 +169,7 @@ class PlayerProfiler:
             next_dom = _dominant_intent(episodes[i + 1].get("player_intents", []))
             if prev_dom != next_dom:
                 strategy_switches += 1
-                if episodes[i]["_result"] == "loss":
+                if player_lost(episodes[i]):
                     adaptations += 1
 
         adapt_score = adaptations / max(1, losses)
@@ -135,19 +178,18 @@ class PlayerProfiler:
         # {unit_type: {used: N, wins: W}}
         # Graceful: old episodes without unit_types return {} safely.
         #
-        # NOTE (found alongside the terrain_tendencies fix, 2026-09-04,
-        # W013): "wins" here has the same General-vs-player perspective
-        # pattern terrain_tendencies had (won = ep["_result"] == "win" is
-        # the General's result, not the player's). NOT fixed here —
-        # unlike terrain_tendencies, this field is not currently consumed
-        # anywhere in decision_engine.py, so it is dormant, not a live
-        # decision-quality bug. Logged in KNOWN_ISSUES.md as W013.
+        # "wins" is the PLAYER's, via player_won() (W013 fix, 2026-09-04).
+        # Not currently consumed anywhere in decision_engine.py, but fixed
+        # for consistency with win_count/adaptability_score/
+        # terrain_tendencies — this module's whole job is player
+        # profiling, so every derived field must share one canonical
+        # perspective, not just the fields already wired into a factor.
         unit_usage: Dict[str, Dict[str, int]] = {}
         for ep in episodes:
             unit_types = (
                 ep.get("player_unit_summary", {}).get("unit_types", {})
             )
-            won = ep["_result"] == "win"
+            won = player_won(ep)
             for ut, count in unit_types.items():
                 if ut not in unit_usage:
                     unit_usage[ut] = {"used": 0, "wins": 0}
@@ -159,21 +201,13 @@ class PlayerProfiler:
         # {terrain: {count: N, wins: W, losses: L}}
         # One count per terrain type per episode (not per event).
         #
-        # wins/losses are from the PLAYER's perspective, not the General's.
-        # ep["_result"] is BattleState.result, which is General-perspective
-        # (see simulator/battle.py _determine_result()) — so a General
-        # "loss" means the player WON that encounter, and a General "win"
-        # means the player LOST it. Bug found 2026-09-04 (Stage 3
-        # completion exercise, W012): this used to increment "wins" on
-        # ep["_result"] == "win" directly, silently recording the
-        # General's win rate as though it were the player's — inverted.
-        # _player_factor()'s TERRAIN_EXPLOIT check reads this value
-        # expecting the player's win rate ("Player wins only X%..."), so
-        # the inversion was a live decision-quality bug, not cosmetic.
+        # wins/losses are from the PLAYER's perspective, via player_won()/
+        # player_lost() (W012 fix, 2026-09-04 — see player_won()'s
+        # docstring for the full history of this pattern across the
+        # module).
         terrain_stats: Dict[str, Dict[str, int]] = {}
         for ep in episodes:
             seen = set()
-            general_result = ep["_result"]
             for event in ep.get("terrain_events", []):
                 terrain = event.get("terrain_at_site", "")
                 if not terrain or terrain in seen:
@@ -182,9 +216,9 @@ class PlayerProfiler:
                 if terrain not in terrain_stats:
                     terrain_stats[terrain] = {"count": 0, "wins": 0, "losses": 0}
                 terrain_stats[terrain]["count"] += 1
-                if general_result == "loss":     # General lost -> player won
+                if player_won(ep):
                     terrain_stats[terrain]["wins"]   += 1
-                elif general_result == "win":     # General won -> player lost
+                elif player_lost(ep):
                     terrain_stats[terrain]["losses"] += 1
 
         # ---- Raw evidence blob ----

@@ -167,6 +167,9 @@ def test_total_battles_correct():
 
 
 def test_win_loss_draw_counts_correct():
+    """win_count/loss_count are the PLAYER's (W013 fix, 2026-09-04):
+    2 General-win episodes -> 2 PLAYER losses; 1 General-loss episode ->
+    1 PLAYER win; draws are symmetric either way."""
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",  episode_id="ep_w1")
     seed_episode(logger, "player_A", "win",  episode_id="ep_w2")
@@ -175,9 +178,35 @@ def test_win_loss_draw_counts_correct():
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
-    assert p["win_count"]  == 2
-    assert p["loss_count"] == 1
+    assert p["win_count"]  == 1  # 1 General-loss episode -> player won once
+    assert p["loss_count"] == 2  # 2 General-win episodes -> player lost twice
     assert p["draw_count"] == 1
+    logger.close()
+
+
+def test_win_count_known_general_loss_episode_records_player_win():
+    """Regression test (W013): a single, unambiguous General-loss episode
+    must be recorded as a PLAYER win in win_count."""
+    logger = temp_logger()
+    seed_episode(logger, "player_A", "loss", episode_id="general_lost")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    assert p["win_count"]  == 1
+    assert p["loss_count"] == 0
+    logger.close()
+
+
+def test_loss_count_known_general_win_episode_records_player_loss():
+    """Regression test (W013): a single, unambiguous General-win episode
+    must be recorded as a PLAYER loss in loss_count."""
+    logger = temp_logger()
+    seed_episode(logger, "player_A", "win", episode_id="general_won")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    assert p["win_count"]  == 0
+    assert p["loss_count"] == 1
     logger.close()
 
 
@@ -361,25 +390,27 @@ def test_all_player_intent_values_classified_exactly_once():
 # ---------------------------------------------------------------------------
 
 def test_adaptability_zero_when_no_losses():
+    """No PLAYER losses (both episodes are General losses = player wins,
+    W013 fix, 2026-09-04) -> adaptability_score = 0 / max(1, 0) = 0."""
     logger = temp_logger()
-    seed_episode(logger, "player_A", "win",
+    seed_episode(logger, "player_A", "loss",
                  player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
-    seed_episode(logger, "player_A", "win",
+    seed_episode(logger, "player_A", "loss",
                  player_intents=["defend"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
-    # No losses → adaptability_score = 0 / max(1, 0) = 0
     assert p["adaptability_score"] == 0.0
     logger.close()
 
 
 def test_adaptability_one_when_always_adapts_after_loss():
-    """Player loses then always changes strategy → adaptability = 1.0"""
+    """Player loses (General win, W013 fix) then always changes strategy
+    -> adaptability = 1.0"""
     logger = temp_logger()
-    seed_episode(logger, "player_A", "loss",
-                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
     seed_episode(logger, "player_A", "win",
+                 player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
+    seed_episode(logger, "player_A", "loss",
                  player_intents=["defend"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
@@ -389,17 +420,51 @@ def test_adaptability_one_when_always_adapts_after_loss():
 
 
 def test_adaptability_zero_when_never_adapts_after_loss():
-    """Player loses twice with same strategy → no adaptation → 0.0"""
+    """Player loses twice (General wins twice, W013 fix) with same
+    strategy -> no adaptation -> 0.0"""
     logger = temp_logger()
-    seed_episode(logger, "player_A", "loss",
+    seed_episode(logger, "player_A", "win",
                  player_intents=["aggressive_rush"] * 3, episode_id="ep_1")
-    seed_episode(logger, "player_A", "loss",
+    seed_episode(logger, "player_A", "win",
                  player_intents=["aggressive_rush"] * 3, episode_id="ep_2")
     pp = PlayerProfiler(logger)
     pp.update_profile("server_1", "player_A")
     p = pp.get_profile("server_1", "player_A")
     assert p["adaptability_score"] == 0.0
     logger.close()
+
+
+def test_adaptability_known_general_win_then_switch_records_player_adaptation():
+    """Regression test (W013): a single, unambiguous General-win episode
+    (= player loss) followed by a strategy switch must count as one
+    player adaptation."""
+    logger = temp_logger()
+    seed_episode(logger, "player_A", "win",
+                 player_intents=["aggressive_rush"] * 3, episode_id="general_won")
+    seed_episode(logger, "player_A", "win",
+                 player_intents=["defend"] * 3, episode_id="ep_2")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    assert p["data"]["loss_recoveries"] == 1
+    logger.close()
+
+
+def test_adaptability_known_general_loss_does_not_count_as_player_adaptation():
+    """Regression test (W013): a single, unambiguous General-loss episode
+    (= player win) followed by a strategy switch must NOT count as a
+    player adaptation, even though the strategy did change."""
+    logger = temp_logger()
+    seed_episode(logger, "player_A", "loss",
+                 player_intents=["aggressive_rush"] * 3, episode_id="general_lost")
+    seed_episode(logger, "player_A", "win",
+                 player_intents=["defend"] * 3, episode_id="ep_2")
+    pp = PlayerProfiler(logger)
+    pp.update_profile("server_1", "player_A")
+    p = pp.get_profile("server_1", "player_A")
+    assert p["data"]["loss_recoveries"] == 0
+    assert p["data"]["strategy_switches"] == 1  # the switch happened...
+    logger.close()  # ...it just wasn't a post-player-loss adaptation
 
 
 def test_adaptability_in_valid_range():
@@ -439,6 +504,9 @@ def test_preferred_units_structure():
 
 
 def test_preferred_units_counts_correct():
+    """wins is the PLAYER's (W013 fix, 2026-09-04): a General-loss episode
+    means the player won, so THAT episode's unit counts contribute to
+    wins, not the General-win episode's."""
     logger = temp_logger()
     seed_episode(logger, "player_A", "win",
                  unit_types={"cavalry": 3}, episode_id="ep_1")
@@ -449,7 +517,7 @@ def test_preferred_units_counts_correct():
     p = pp.get_profile("server_1", "player_A")
     cav = p["preferred_units"].get("cavalry", {})
     assert cav["used"] == 6      # 3 + 3 across both battles
-    assert cav["wins"] == 3      # only from the win battle
+    assert cav["wins"] == 3      # only from the General-loss (player-won) battle
     logger.close()
 
 

@@ -245,21 +245,52 @@ for the corrected report.
 **Commits:** bugfix + tests in the same commit as the corrected exercise
 rerun, 2026-09-04.
 
-### W013 — preferred_units "wins" has the same General-vs-player perspective pattern as W012, but is currently dormant (found 2026-09-04, alongside the W012 fix)
-**Component:** `src/brain/player_profiler.py` (`update_profile()`'s
-`unit_usage` computation)
-**Description:** `unit_usage[unit_type]["wins"]` is computed via
-`won = ep["_result"] == "win"` — the same General-perspective-used-as-
-player-perspective pattern W012 had. Checked whether this is currently a
-live decision-quality bug the way W012 was: `grep -n "preferred_units"
-src/brain/decision_engine.py` returns **no matches** — `preferred_units`
-is not consumed by `decide()` or any factor function anywhere today. So
-this is dormant data with the same latent defect, not an active one.
-**Fix (not done — logged only):** apply the same inversion W012 got
-(`wins` increments on `ep["_result"] == "loss"`, not `"win"`) whenever
-`preferred_units` is first wired into a decision factor — fixing it
-before that point is speculative since nothing consumes it yet, and
-fixing it without a consumer to test against would be unverifiable.
-**When to address:** Before `preferred_units` is ever read by
-`decision_engine.py` for the first time — flag this issue explicitly at
-that point, don't let it repeat the same silent-bug pattern.
+### W013 — RESOLVED 2026-09-04 — adaptability_score, win_count/loss_count, and preferred_units["wins"] were all General-perspective, not player-perspective
+**Component:** `src/brain/player_profiler.py` (`update_profile()`)
+**Description:** Initially logged as "dormant" — that classification was
+**wrong** and corrected by a second supervisor review pass. `grep` for
+`preferred_units` in `decision_engine.py` does return no matches, so
+*that one field* was genuinely dormant. But the same
+General-perspective-used-directly pattern also affected `win_count`/
+`loss_count` (top-level profile fields) and, critically,
+**`adaptability_score`** — which **is** live, read directly inside
+`_player_factor()`'s `COUNTER_AGGRESSIVE` boost condition
+(`if adaptability < 0.3 and aggression > 0.6 and intent in
+COUNTER_AGGRESSIVE: factor *= 1.1`). Before this fix, "adaptation" was
+counted after `episodes[i]["_result"] == "loss"` — a **General** loss,
+meaning the player had just **won** that battle. So the system could
+label a player "unadaptable after losses" based on battles the player
+actually won, and use that incorrect score to boost counter-aggressive
+decisions. This was a real, live decision-quality defect, not dormant
+data — exactly the same category of bug as W012, just not caught in the
+first pass because the Stage 3 exercise's specific cohorts (Aggressor:
+no intent variation at all; Terrain: not adaptability-focused) happened
+not to expose it numerically, even though the underlying computation was
+wrong.
+**Fix:** `player_won(ep)`/`player_lost(ep)` defined once in
+`player_profiler.py` (`ep["_result"] == "loss"` / `== "win"` respectively)
+and used consistently for `win_count`/`loss_count`,
+`adaptability_score`'s adaptation-counting and its denominator,
+`preferred_units["wins"]`, and `terrain_tendencies` (refactored to use
+the same helpers, no logic change there — W012's fix was already
+correct). Module docstring updated to state the invariant explicitly:
+every derived field in this module must go through these two helpers,
+never `ep["_result"]` directly.
+**Tests:** 4 new regression tests using single, unambiguous known-outcome
+episodes — `test_win_count_known_general_loss_episode_records_player_win`,
+`test_loss_count_known_general_win_episode_records_player_loss`,
+`test_adaptability_known_general_win_then_switch_records_player_adaptation`,
+`test_adaptability_known_general_loss_does_not_count_as_player_adaptation`.
+Existing `test_win_loss_draw_counts_correct` and the three
+`test_adaptability_*` tests corrected (they previously pinned the wrong
+direction as correct — the same failure pattern as both prior bugs this
+session).
+**Stage 3 completion exercise:** rerun in full after the fix. Headline
+numbers for this specific run are unchanged from the previous (W012-only)
+run — the Aggressor cohort never switches intent (no adaptability signal
+either way) and the Terrain cohort's `terrain_tendencies` was already
+correct from the W012 fix — but the underlying model is now internally
+consistent and verified directly by the 4 regression tests above, which
+is the more rigorous proof; it should not require a specific dataset to
+happen to expose a bug for the fix to be trusted.
+**Commits:** fix + tests + exercise rerun, 2026-09-04.

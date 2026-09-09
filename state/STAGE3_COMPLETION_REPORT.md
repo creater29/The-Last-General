@@ -1,7 +1,7 @@
 # Stage 3 Completion — Multi-Player Live Intelligence Exercise Report
 
-**Date:** 2026-09-04 (corrected after supervisor review found a real
-behavioral bug in the first run — see "W012 correction" below)
+**Date:** 2026-09-04 (corrected twice after supervisor review — see
+"W012 correction" and "W013 correction" below)
 **Script:** `scripts/stage3_completion_exercise.py`
 **Exercise DB:** `data/exercises/stage3_completion_2026-09-04.db` (gitignored, generated data)
 **Reproducibility:** confirmed — repeated end-to-end runs produce
@@ -44,11 +44,45 @@ dataset doesn't trigger it.
 
 ---
 
+## W013 correction — a second, deeper instance of the same bug
+
+After the W012 fix, a second supervisor review pass correctly found that
+the fix was incomplete. `player_profiler.py` had **three more** fields
+computed directly from `ep["_result"]` (General-perspective) instead of
+the player's: `win_count`/`loss_count`, `preferred_units["wins"]`, and —
+critically — `adaptability_score`, which **is** read live inside
+`_player_factor()`'s `COUNTER_AGGRESSIVE` boost condition. The system
+could label a player "unadaptable after losses" based on battles the
+player actually **won**, and use that wrong score to boost
+counter-aggressive decisions. This was first misclassified as "dormant"
+(only true for `preferred_units`, not for `adaptability_score`) — that
+classification was itself wrong and has been corrected.
+
+**Fix:** `player_won(ep)`/`player_lost(ep)` defined once in
+`player_profiler.py` and used consistently across every derived field —
+`win_count`/`loss_count`, `adaptability_score`, `preferred_units["wins"]`,
+and `terrain_tendencies` (refactored onto the same helpers; no logic
+change there, W012's fix was already correct). 4 new regression tests
+using single, unambiguous known-outcome episodes.
+
+**Exercise rerun in full.** For this specific dataset, the printed
+headline numbers are unchanged from the previous run — the Aggressor
+cohort never switches intent at all (no adaptability signal either way
+regardless of the bug) and the Terrain cohort's relevant numbers were
+already correct from the W012 fix. This is expected, not a sign the fix
+didn't matter: the bug's correctness is now established by 4 direct
+regression tests using known General-win/General-loss episodes, which is
+stronger evidence than this particular exercise happening (or not
+happening) to expose it numerically. See `state/KNOWN_ISSUES.md` W013
+for full detail.
+
+---
+
 ## Isolation proof
 
 ```
-Production DB SHA-256 (before): d44e5f9a749907f382842446d89cab39a83dd28d1173623542c8c97e7b3adda7
-Production DB SHA-256 (after):  d44e5f9a749907f382842446d89cab39a83dd28d1173623542c8c97e7b3adda7
+Production DB SHA-256 (before): 7bc1b3471e2451c53b76bb10e58ceb00ef463cbf8fdb972bed054d2b0612e9e2
+Production DB SHA-256 (after):  7bc1b3471e2451c53b76bb10e58ceb00ef463cbf8fdb972bed054d2b0612e9e2
 Production DB unchanged: True
 ```
 
@@ -171,13 +205,13 @@ Draw control confirms the mechanism doesn't spuriously move trust on a neutral o
 ## Findings logged during this exercise
 
 - **W012 (RESOLVED):** `terrain_tendencies` win/loss inversion — real bug, fixed, regression-tested, exercise rerun with corrected result reported honestly above.
-- **W013 (logged, not fixed):** `preferred_units["wins"]` has the identical General-vs-player perspective pattern, but is currently **dormant** — not consumed anywhere in `decision_engine.py` — so it's a latent defect, not an active one. Flagged for whenever `preferred_units` is first wired into a decision factor.
+- **W013 (RESOLVED):** `win_count`/`loss_count`, `preferred_units["wins"]`, and — critically — the live-consumed `adaptability_score` all had the identical General-vs-player perspective bug. Initially misclassified as "dormant"; corrected on a second review pass once it was shown `adaptability_score` is read directly inside `_player_factor()`. Fixed at the source via canonical `player_won()`/`player_lost()` helpers, 4 new regression tests, exercise rerun.
 
 ---
 
 ## Files touched
-- `src/brain/player_profiler.py` (W012 fix)
-- `tests/test_player_profiler.py` (corrected + 2 new regression tests)
+- `src/brain/player_profiler.py` (W012 + W013 fixes)
+- `tests/test_player_profiler.py` (corrected existing tests + 8 new regression tests across W012/W013)
 - `scripts/stage3_completion_exercise.py` (hard-fail gates, real failure_count assertion, corrected terrain check)
-- `state/KNOWN_ISSUES.md` (W012 resolved, W013 logged)
-- `state/STAGE3_COMPLETION_REPORT.md` (this file, rewritten)
+- `state/KNOWN_ISSUES.md` (W012 and W013 both resolved)
+- `state/STAGE3_COMPLETION_REPORT.md` (this file, corrected twice)
