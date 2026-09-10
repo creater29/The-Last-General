@@ -1000,18 +1000,33 @@ def test_decide_composition_used_false_when_confidence_zero():
 def test_fallback_response_includes_composition_used_false():
     """decide()'s fallback path is unreachable via the public API today —
     _filter_intents() always leaves at least FALLBACK_INTENT available, so
-    the `scores` dict inside decide() can never end up empty (see
-    KNOWN_ISSUES.md W011 for the related relationship_used gap this same
-    code path already had). Testing _fallback_response() directly is the
-    only way to verify its contract. Per supervisor decision (2026-09-04):
-    a public decision-result field must exist on every return path,
-    including this one — composition_used must not repeat the
-    relationship_used omission."""
+    the `scores` dict inside decide() can never end up empty. Testing
+    _fallback_response() directly is the only way to verify its contract.
+    Per supervisor decision (2026-09-04): a public decision-result field
+    must exist on every return path, including this one — composition_used
+    must not repeat the relationship_used omission (W011, since resolved —
+    see test_fallback_response_includes_relationship_used_false below,
+    added during the Stage 3 consolidation audit)."""
     logger = temp_logger()
     engine = make_engine(logger)
     result = engine._fallback_response(rejected=["TEST: forced"], profile_used=False)
     assert "composition_used" in result
     assert result["composition_used"] is False
+    logger.close()
+
+
+def test_fallback_response_includes_relationship_used_false():
+    """Regression test (W011, resolved 2026-09-04 during the Stage 3
+    consolidation audit): _fallback_response() was missing the
+    relationship_used key that decide()'s own docstring documents as part
+    of its return contract. Fixed to match the composition_used pattern
+    above — every public decision-result field must exist on every return
+    path, including the fallback path."""
+    logger = temp_logger()
+    engine = make_engine(logger)
+    result = engine._fallback_response(rejected=["TEST: forced"], profile_used=False)
+    assert "relationship_used" in result
+    assert result["relationship_used"] is False
     logger.close()
 
 

@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from simulator.grid import Grid
 from simulator.units import UnitType, make_unit

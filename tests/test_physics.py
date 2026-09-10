@@ -2,7 +2,8 @@
 test_physics.py — Verify terrain event resolution and combat physics.
 """
 import sys
-sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from simulator.grid import Grid, Cell, TerrainType
 from simulator.units import Unit, UnitType, UnitGroup, make_unit, make_group

@@ -731,5 +731,6 @@ class DecisionEngine:
             "alternatives":         [],
             "doctrines_consulted":  [],
             "profile_used":         profile_used,
+            "relationship_used":    False,
             "composition_used":     False,
         }

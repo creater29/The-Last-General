@@ -2,7 +2,8 @@
 test_battle.py — Verify battle loop, intent execution, end conditions.
 """
 import sys
-sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from simulator.grid import Grid, TerrainType
 from simulator.units import UnitType, make_unit, make_group
