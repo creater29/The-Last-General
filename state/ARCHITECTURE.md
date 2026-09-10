@@ -749,6 +749,40 @@ considered and rejected for this reason.
 
 ## Core Data Structures
 
+> **⚠️ ORIGINAL DESIGN DRAFT — verify against live code before relying on
+> this section, found during the Stage 3 consolidation audit, 2026-09-04.**
+> This section (through "Decision Architecture (Stage 2)" and "Memory
+> Layers" below) was written before Stage 2 implementation and, for
+> `PlayerProfile` and the decision-scoring diagram specifically, was
+> never updated to match what was actually built. It is preserved as
+> historical design intent, not deleted, but do not treat it as current
+> fact. Concretely wrong today:
+> - `PlayerProfile`'s nested tactical/strategic/psychological structure
+>   (`favorite_opening`, `army_composition`, `honor_score`, `greed_score`,
+>   etc.) was never built. The actual schema is flat: `win_count`,
+>   `loss_count`, `draw_count`, `aggression_index`, `adaptability_score`,
+>   `preferred_units`, `terrain_tendencies`, plus a raw `data` evidence
+>   blob — see `src/brain/player_profiler.py`'s module docstring and
+>   `CLAUDE_BRIEFING.md`'s "Three Memory Stores" section for the real
+>   shape.
+> - Both `player_profiles` and `player_general_relationship` use a
+>   **composite `(server_id, player_id)` primary key**, not the
+>   single-column `player_id` PK shown in several examples below. Verified
+>   directly against `src/simulator/logger.py`'s live `init_db()`. The
+>   corrected SQL schema is in the "Database Schema" section further
+>   down, which has been fixed to match reality.
+> - The weighted-sum decision formula in "Decision Architecture (Stage 2)"
+>   below (`0.4 × doctrine_score + 0.3 × counter_doctrine_score + ...`)
+>   was superseded by the actual implementation: a **multiplicative
+>   5-factor pipeline** (doctrine × player × situation × relationship ×
+>   composition) — see the "E1 Implementation Plan" section above (search
+>   "Decision Pipeline") for the accurate, current description, already
+>   verified against live `decision_engine.py` code earlier in this same
+>   audit.
+> - "Player Intent Prediction" and "Counter-Doctrine Retrieval" as
+>   pipeline *steps* were never built — D006 and D007 remain
+>   evidence-gated and deferred (see `DEFERRED_ITEMS.md`).
+
 ### Cell
 ```python
 Cell = {
@@ -1081,6 +1115,12 @@ forest:
 hill:
     charge_penalty: -30% effectiveness going uphill
     visibility_bonus: +40% sight range from top
+    # ⚠️ CONTRADICTS "Perception & Observation Architecture" above: HILL's
+    # visibility_bonus is confirmed DEAD CODE (defined in grid.py, never
+    # read anywhere) and that section explicitly says not to revive this
+    # exact terrain-type-coupled pattern when visibility mechanics are
+    # eventually built (E2+). This design-draft rule predates that
+    # correction and was left un-synced. Trust the later section.
 
 river:
     crossing_speed: -60% mobility
@@ -1097,11 +1137,19 @@ wall:
 
 ```sql
 -- Raw battle records — source of truth for all learning
+-- Verified against src/simulator/logger.py's live init_db() during the
+-- Stage 3 consolidation audit, 2026-09-04 — result and turns_played were
+-- missing from this doc.
 CREATE TABLE episodes (
     id TEXT PRIMARY KEY,
     timestamp TEXT,
     player_id TEXT,
     age INTEGER,
+    result TEXT,             -- "win" | "loss" | "draw", General-perspective
+                              -- (see player_profiler.py's player_won()/
+                              -- player_lost() for the inversion every
+                              -- player-facing metric must apply — W012/W013)
+    turns_played INTEGER,
     data JSON               -- full to_episode() dict, no raw physics
 );
 
@@ -1134,26 +1182,52 @@ CREATE TABLE observations (
     FOREIGN KEY (episode_id) REFERENCES episodes(id)
 );
 
--- What THIS player does — tactical/strategic/psychological
+-- What THIS player does, server-scoped — the actual implemented schema,
+-- verified against src/simulator/logger.py's live init_db(), Stage 3
+-- consolidation audit 2026-09-04. This replaces the schema previously
+-- shown here, which never matched the real implementation (single-column
+-- player_id PK, encounter_count/first_seen_age/last_seen_age columns
+-- that were never built — see the note above "Core Data Structures"
+-- for the fuller PlayerProfile aspirational-vs-actual gap this
+-- schema block inherited).
 CREATE TABLE player_profiles (
-    player_id TEXT PRIMARY KEY,
-    encounter_count INTEGER,
-    first_seen_age INTEGER,
-    last_seen_age INTEGER,
-    data JSON               -- full PlayerProfile dict
+    server_id          TEXT NOT NULL,
+    player_id          TEXT NOT NULL,
+    first_seen         TEXT,
+    last_seen          TEXT,
+    total_battles      INTEGER NOT NULL DEFAULT 0,
+    win_count          INTEGER NOT NULL DEFAULT 0,   -- PLAYER's, via player_won()
+    loss_count         INTEGER NOT NULL DEFAULT 0,   -- PLAYER's, via player_lost()
+    draw_count         INTEGER NOT NULL DEFAULT 0,
+    preferred_units    JSON NOT NULL DEFAULT '{}',   -- {type: {used, wins}}
+    terrain_tendencies JSON NOT NULL DEFAULT '{}',   -- {terrain: {count, wins, losses}}
+    aggression_index   REAL NOT NULL DEFAULT 0.5,
+    adaptability_score REAL NOT NULL DEFAULT 0.5,
+    data               JSON NOT NULL DEFAULT '{}',   -- raw evidence blob
+    PRIMARY KEY (server_id, player_id)
 );
 
 -- General's personal history with THIS player — trust, betrayal, etc.
+-- server_id added to the PK below, and encounters added to the column
+-- list, per the same audit pass — both were missing from this doc.
+-- predicted_next_intent/prediction_confidence/notable_events genuinely
+-- exist as columns (not aspirational) but are not populated or read by
+-- RelationshipManager's current interface (RelationshipState) — dead
+-- columns today, not active fields. Do not build against them without
+-- first checking whether RelationshipManager actually exposes them.
 CREATE TABLE player_general_relationship (
-    player_id TEXT PRIMARY KEY,
+    server_id               TEXT NOT NULL,
+    player_id               TEXT NOT NULL,
     trust_level REAL,
     betrayal_count INTEGER,
     cooperation_count INTEGER,
     times_attempted_capture INTEGER,
     known_deceptions INTEGER,
+    encounters INTEGER,
     predicted_next_intent TEXT,
     prediction_confidence REAL,
-    notable_events JSON
+    notable_events JSON,
+    PRIMARY KEY (server_id, player_id)
 );
 
 -- Terrain physics as observed by General (NOT the simulator's ground truth)
