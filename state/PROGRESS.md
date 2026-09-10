@@ -8,16 +8,35 @@
 
 ## Stage 1 — Simulator [COMPLETE ✅]
 
+Per-file counts verified fresh during the Stage 3 consolidation audit,
+2026-09-04 (`pytest --collect-only` per file) — several had drifted from
+what this table showed, grown by later Stage 3 candidates touching Stage
+1 files (`battle.py` gained `player_intent_fn` + reconnaissance in
+Candidate E; `logger.py` shrank because Candidate D moved most of its
+persistence logic into `src/simulator/stores/`, with those tests now
+living in five separate files, not folded back into this table).
+
 | File | Tests | Notes |
 |------|-------|-------|
 | src/simulator/grid.py | 12 | Terrain world, zone generation |
 | src/simulator/units.py | 29 | Unit types, mass, behaviour |
 | src/simulator/physics.py | 23 | Terrain interaction engine |
-| src/simulator/battle.py | 26 | Battle loop + to_brain_snapshot() |
-| src/simulator/logger.py | 35 | SQLite persistence, all DB access |
+| src/simulator/battle.py | 38 | Battle loop + to_brain_snapshot() (was 26 — Candidate E added `player_intent_fn` hook + reconnaissance tests) |
+| src/simulator/logger.py | 28 | Facade only, post-Candidate-D (was 35 pre-split — persistence logic + its tests now live in the five store files below) |
 | src/simulator/snapshot.py | 20 | CommanderKnowledge dataclass |
-| src/simulator/training_profiles.py | 22 | Corpus generation profiles |
-| scripts/generate_corpus.py | (integration) | CLI generation tool |
+| src/simulator/training_profiles.py | 24 | Corpus generation profiles (was 22) |
+| scripts/generate_corpus.py | 3 | CLI generation tool — `test_generate_corpus.py`, added Stage 3 for `seed=` determinism |
+
+**Store layer (Candidate D, D014) — extracted from `logger.py`, not separately tracked in "Stage 1" historically but the code they test lives under `src/simulator/`:**
+
+| File | Tests |
+|------|-------|
+| src/simulator/stores/relationship_store.py | 8 |
+| src/simulator/stores/player_profile_store.py | 10 |
+| src/simulator/stores/doctrine_store.py | 12 |
+| src/simulator/stores/observation_store.py | 12 |
+| src/simulator/stores/episode_store.py | 13 |
+| tests/test_logger_facade_stability.py | 2 |
 
 ### Stage 1 DB State
 - Original 100 battles: flood=6296, tree_fall=146, wall_collapse=78, ice_break=6
@@ -29,19 +48,29 @@
 
 ## Stage 2 — Brain Core [COMPLETE ✅]
 
+Per-file counts verified fresh during the Stage 3 consolidation audit,
+2026-09-04. `player_profiler.py` and `decision_engine.py` both grew
+substantially from later Stage 3 candidates (Candidate E's composition
+factor and the W012/W013 player-perspective bugfix regression tests).
+`relationship_manager.py` is intentionally not in this table — it's a
+Stage 3 file (Candidate C), not Stage 2; see the Candidate C section
+below.
+
 | File | Tests | Notes |
 |------|-------|-------|
 | src/brain/world_model.py | 30 | Terrain beliefs from observations |
 | src/brain/doctrine_extractor.py | 36 | Promotes beliefs → doctrines |
-| src/brain/player_profiler.py | 35 | Per-player behaviour profiles |
-| src/brain/decision_engine.py | 57 | Hierarchical reasoning pipeline |
+| src/brain/player_profiler.py | 44 | Per-player behaviour profiles (was 35 — W012/W013 fix added regression tests) |
+| src/brain/decision_engine.py | 91 | Hierarchical reasoning pipeline, 5 factors (was 57 — Candidate C's relationship factor and Candidate E's composition factor both live here) |
 
-### Stage 2 Completion Criteria (all met)
+### Stage 2 Completion Criteria (all met, historical — 304/304 was the
+### count at Stage 2's completion, 2026-06-25ish; see current header for
+### today's count)
 - ✅ General forms 4 doctrines with confidence > 0.6 (one per terrain event type)
 - ✅ Player profile populates from episode history
 - ✅ Decisions differ by context (TERRAIN_EXPLOIT on frozen lake, DEFENSIVE_HOLD vs aggressive player)
 - ✅ Decision reasoning is inspectable (full trace in decide() output)
-- ✅ 304/304 tests passing
+- ✅ 304/304 tests passing (at Stage 2 completion — historical, not current)
 
 ---
 
@@ -757,6 +786,9 @@ explicitly deferred to this point (per their own `state/DEFERRED_ITEMS.md`
 | 2026-06-25 | Intent strings not GeneralIntent enum in brain | No battle.py import needed |
 | 2026-06-28 | Integration test uses production DB | Real corpus doctrines needed for influence validation |
 | 2026-06-28 | brain_intent_fn closes over loop ref | Snapshot requires live BattleLoop state, not BattleState arg |
+| 2026-06-28 | RelationshipManager returns raw RelationshipState, never computes modifiers | Orthogonality rule — DecisionEngine owns all intent interpretation |
+| 2026-09-04 | Scoring expanded to 5 factors (doctrine × player × situation × relationship × composition) | Candidate C added relationship, Candidate E added composition — both multiplicative, matching the original 3-factor decision's reasoning |
+| 2026-09-04 | Every derived per-player profile field must go through canonical player_won()/player_lost() helpers, never ep["_result"] directly | W012/W013 — the same perspective-inversion mistake was made twice before being caught; codified as project Rule 8 in CLAUDE_BRIEFING.md |
 
 ---
 
