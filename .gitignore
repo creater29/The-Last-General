@@ -9,6 +9,12 @@ dist/
 build/
 .eggs/
 
+# Local-only state docs — kept on disk and kept up to date, but not
+# tracked in git / not pushed to the remote (per explicit request,
+# 2026-09-04). Working files remain untouched locally.
+state/SESSION_HANDOFF.md
+state/CLAUDE_BRIEFING.md
+
 # Virtual environments
 venv/
 .venv/
