@@ -49,6 +49,17 @@ doctrine IDs before failure_count can be incremented on the correct row.
 **What is NOT done:** Time-based staleness scan. Doctrines that have not been
   triggered for many episodes should lose confidence slowly even without failures.
 **When to address:** After player_general_relationship is complete (Candidate C)
+**Trigger status (2026-09-04, Stage 3 completion exercise):** the stated
+  trigger (Candidate C complete) has been met for a long time, but the
+  exercise deliberately looked for evidence this is actually needed and
+  found `insufficient evidence` — not `not needed`, not `needed`. 18
+  battles plus a 600-episode deterministic bootstrap in one session
+  cannot demonstrate decay over real elapsed time, which is what this
+  item is actually about. **Deliberately still not built** — the trigger
+  firing is necessary but was correctly judged not sufficient on its own;
+  evidence of stale doctrines actually harming live decisions is the
+  real bar, and none has been observed. See
+  `state/STAGE3_COMPLETION_REPORT.md`.
 **What to do:**
 - Add `episodes_since_last_verified` as a computed field when reading doctrines.
 - In a new `DecisionEngine.decay_stale_doctrines(current_episode_count)` method:
@@ -96,6 +107,15 @@ doctrine IDs before failure_count can be incremented on the correct row.
 **Deferred from:** Architecture — counter_doctrines table exists but is empty
 **Why deferred:** Requires both doctrines AND player intent prediction to exist first.
 **When to address:** After Candidate C (relationship manager) is complete
+**Trigger status (2026-09-04, Stage 3 completion exercise):** trigger met
+  for a long time, same as D002. The exercise's 18 battles were checked
+  for a repeated (X, Y, Z, win) pattern per the criteria below and none
+  surfaced — `insufficient evidence`, not `not needed`. `counter_doctrines`
+  remains empty by informed decision, not oversight. Re-evaluate once a
+  larger live-battle volume (well beyond 18) is available to check
+  against, or once D006's rule-based predictor is judged insufficient
+  (D007 depends on player intent prediction, per the note above). See
+  `state/STAGE3_COMPLETION_REPORT.md`.
 **What to do:**
 - A counter-doctrine forms when:
   1. Player used intent X in terrain context Y
@@ -671,32 +691,27 @@ forced into either `EpisodeStore` or `ObservationStore`.
 
 ---
 
-### D023 — EpisodeLogger.__init__ store construction registry
+### D023 — EpisodeLogger.__init__ store construction registry ✅ DECIDED 2026-09-04 (Stage 3 consolidation audit) — keep as-is, no registry
 **Deferred from:** Candidate D Phase 3 supervisor review
-**Current state:** `EpisodeLogger.__init__` constructs each store manually:
+**Decision, judged from the actual Phase 6 code, not speculation:**
 ```python
-self._relationship_store = RelationshipStore(self._conn)
+self._relationship_store   = RelationshipStore(self._conn)
 self._player_profile_store = PlayerProfileStore(self._conn)
-self._doctrine_store = DoctrineStore(self._conn)
+self._doctrine_store       = DoctrineStore(self._conn)
+self._observation_store    = ObservationStore(self._conn)
+self._episode_store        = EpisodeStore(self._conn)
 ```
-Perfectly acceptable at 3 stores. By Phase 6 there will be 5
-(Relationship, PlayerProfile, Doctrine, Observation, Episode — WorldModel
-is not included in Candidate D's scope, see D024), at which point
-`__init__` becomes a manual
-dependency list of five near-identical lines.
-**Why deferred:** No evidence yet that this is a real problem — it's a
-one-time constructor cost, not a runtime cost, and five explicit lines is
-still readable. "Evidence before implementation" cuts against introducing
-a registry/dependency-container pattern now on the strength of a review
-comment alone, with no measured maintenance pain yet.
-**When to address:** Only after Phase 6 (facade cleanup) is complete —
-revisit then and judge from the actual five-store `__init__`, not from
-speculation about what it might look like.
-**What to consider then (not before):** a small internal registry
-(`self._stores = {name: StoreClass(self._conn) for ...}`) OR simply leaving
-it as five explicit lines if it's still readable at that point. Do not
-introduce a generic plugin/registry system speculatively — match whatever
-the actual Phase 6 `__init__` looks like.
+Five lines, read directly from `src/simulator/logger.py`'s live
+`__init__` during the consolidation audit. Still perfectly readable — a
+registry/dependency-container pattern would add indirection for zero
+measured benefit. No maintenance pain has been reported or observed
+across Candidates D and E. Per the item's own instruction ("simply
+leaving it as five explicit lines if it's still readable at that
+point"), that is the outcome: **no change made, no registry
+introduced.**
+**Re-open trigger:** if a sixth store is ever added and the constructor
+genuinely becomes hard to read, or if real maintenance pain is reported —
+not on review-comment strength alone.
 
 ---
 
