@@ -26,8 +26,6 @@ stability test baseline updated in the same commit with this reason.
 
 ---
 
-## Resolved Issues
-
 ### R007 — doctrines_consulted field used synthetic IDs, not real doctrine IDs (FIXED 2026-06-28)
 **Component:** src/brain/decision_engine.py (_doctrine_factor, decide())
 **Description:** The `doctrines_consulted` list in `decide()` output was
@@ -95,14 +93,23 @@ may pressure 8GB unified memory.
 **Mitigation:** Stream episodes in batches of 1000 max. Never load full DB.
 **When to address:** When episode count exceeds 50,000.
 
-### W002 — No feedback loop on doctrine quality
-**Risk:** failure_count and decay_rate fields exist in doctrines table
-but are always 0. The General's doctrines never degrade after a failed
-application, and never improve from repeated success.
-**Mitigation planned:** Wire failure_count increment when a doctrine-backed
-decision leads to a loss. decay_rate logic reduces confidence over time
-without observed reinforcement. Requires W009 fix first (need real doctrine IDs).
-**When to address:** Stage 3 Candidate B.
+### W002 — RESOLVED 2026-06-28 (Candidate B) — No feedback loop on doctrine quality
+**Risk (as originally written):** failure_count and decay_rate fields exist in
+doctrines table but are always 0. The General's doctrines never degrade after a
+failed application, and never improve from repeated success.
+**Superseded — found stale during the Stage 3 consolidation audit,
+2026-09-04:** this entry described a pre-Candidate-B state and was never
+updated once Candidate B actually built the feedback loop it worried
+about. `DecisionEngine.record_battle_outcome()` and
+`EpisodeLogger.increment_doctrine_failure()` exist and work — see R007
+above, and re-verified directly (not assumed) during this session's
+Stage 3 completion exercise: 504 real `failure_count` increments applied
+across 18 battles, asserted to match `record_battle_outcome()`'s
+reported total exactly.
+**Status:** Resolved. Left in the Watch List (rather than moved to
+Resolved Issues) only because it predates this file's current
+categorization convention — content is otherwise identical to a Resolved
+entry.
 
 ### W003 — Decision scoring weights are untested heuristics
 **Risk:** Weather factors (×1.4 for fog+ambush, ×0.7 for blizzard+attack etc.)
@@ -112,16 +119,29 @@ turn. Normalization (score-min)/range correctly reflects dominance, but
 weights have not been calibrated against real outcomes.
 **Mitigation planned:** Log every decide() call with all factors. Review factor
 distributions after 1000 live decisions. Calibrate from observed outcomes.
-**When to address:** After integration test is running and logging decisions
-(now complete) — revisit during Stage 3B or 3C.
+**Tracked as D005/D017 in `DEFERRED_ITEMS.md`** (found during the Stage 3
+consolidation audit, 2026-09-04, that this entry and those two deferred
+items describe the same concern without cross-referencing each other —
+this note closes that gap). Both remain correctly untriggered: the
+1000-live-decision threshold has not been reached — production has
+0 rows in `player_profiles` (all 12,000+ episodes came from corpus
+generation, which never calls `decide()` through the live pipeline), and
+the Stage 3 exercise's 18 battles don't change that by themselves.
+**When to address:** After 1000+ live decisions are logged (see D005/D017
+for the exact trigger) — no longer described as "Stage 3B or 3C," which
+were never real sub-stage labels this project used.
 
 ### W004 — Turn-based to event-triggered upgrade
 **Risk:** Simulator built turn-based may need significant refactoring
-when upgrading to event-triggered execution (Stage 3+).
+when upgrading to event-triggered execution.
 **Mitigation:** Keep battle loop modular. The to_brain_snapshot() method
 is the clean integration point — the engine receives a snapshot per turn,
 which maps naturally to event-triggered: snapshot per event instead.
-**When to address:** Stage 3 planning.
+**Tracked as D009 in `DEFERRED_ITEMS.md`**, which is explicit that this is
+**Stage 4** scope (start of Stage 4, before any Stage 4 features) — found
+during the Stage 3 consolidation audit, 2026-09-04, that "Stage 3+" here
+was vague and predates D009's precise scoping.
+**When to address:** Start of Stage 4, per D009 — not "Stage 3 planning."
 
 ### W005 — Flood dominance (RESOLVED 2026-06-23)
 **Component:** training_profiles.py, generate_corpus.py
@@ -137,7 +157,11 @@ DB now has balanced evidence for all four terrain event types.
 unwieldy at 20+ entries. Unknown combinations fall back to template string.
 **Mitigation planned:** When entry count reaches 20, refactor to metadata-
 driven generation (terrain → action → effect → principle string).
-**When to address:** When new terrain types or event types are added.
+**Tracked as D020 in `DEFERRED_ITEMS.md`** (cross-reference added during
+the Stage 3 consolidation audit, 2026-09-04). Re-verified live during the
+same audit: still exactly 6 entries in `PRINCIPLE_TEMPLATES`
+(`src/brain/doctrine_extractor.py`), well under the 20-entry trigger.
+**When to address:** When entry count reaches 20, per D020.
 
 ### W007 — CommanderKnowledge snapshot field scope creep
 **Risk:** snapshot.py could become a dumping ground if future developers
@@ -146,15 +170,27 @@ add fields without discipline. Each added field increases what the brain
 **Mitigation:** CommanderKnowledge is a typed dataclass (not a dict) so
 adding fields requires explicit code change visible in git. The import
 constraint tests catch any attempt to bypass snapshot.py via battle.py.
+**Tracked as D021 in `DEFERRED_ITEMS.md`** (cross-reference added during
+the Stage 3 consolidation audit, 2026-09-04) — a process-discipline item,
+not a build task. Confirmed actually followed in practice: Candidate E's
+`known_enemy_composition` field addition went through exactly this
+review question before being added.
 **When to address:** Review before each new field addition. Ask: is this
 something the General can genuinely observe without a scout report?
 
-### W008 — player_general_relationship table not yet built
-**Risk:** Third memory store described in architecture is empty.
-Relational memory (trust level, betrayal count, cooperation history)
-is tracked nowhere.
-**Mitigation planned:** Build as Stage 3 component after integration test.
-**When to address:** Stage 3 Candidate C.
+### W008 — RESOLVED 2026-06-28 (Candidate C) — player_general_relationship table not yet built
+**Risk (as originally written):** Third memory store described in
+architecture is empty. Relational memory (trust level, betrayal count,
+cooperation history) is tracked nowhere.
+**Superseded — found stale during the Stage 3 consolidation audit,
+2026-09-04:** Candidate C built exactly this — `src/brain/
+relationship_manager.py`, `RelationshipManager`/`RelationshipState`, wired
+into `decision_engine.py`'s `_relationship_factor()`. Verified live and
+working again this session via the Stage 3 completion exercise's
+controlled factor comparisons (trust=-0.30 measurably changing
+`DEFENSIVE_HOLD`/`AGGRESSIVE_PUSH` scores with explanatory reasoning
+notes).
+**Status:** Resolved. Left in the Watch List, same reasoning as W002.
 
 ### W010 — Hardcoded absolute import path in test files (logged 2026-09-04, Candidate E E1 Step 2 review)
 **Component:** tests/test_battle.py (confirmed), likely other test files —
@@ -167,14 +203,13 @@ a fresh clone on another machine, another user account, or Linux would
 fail this line even with dependencies correctly installed. Predates
 Candidate E; discovered while extending `test_battle.py` for E1 Step 2,
 flagged by supervisor review as out of scope for that step.
-**Fix (not done — logged only, per Candidate Discipline):** Audit all test
-files for this pattern; replace with a path derived from `__file__`
-(e.g. `Path(__file__).resolve().parents[1] / "src"`) or a `conftest.py`
-fixture/`pytest.ini` `pythonpath` setting so no individual test file needs
-its own `sys.path` manipulation at all.
-**When to address:** Dedicated consolidation-audit pass across all test
-files — not mid-candidate, to avoid scope creep into unrelated test
-infrastructure while E1 Step 3 is in progress.
+**Fix — RESOLVED 2026-09-04 (Stage 3 consolidation audit):** all five files
+(`test_grid.py`, `test_battle.py`, `test_units.py`, `test_physics.py`,
+`test_logger.py`) fixed, replaced with `sys.path.insert(0,
+str(Path(__file__).parent.parent / "src"))`, matching the pattern already
+correct elsewhere. Verified no hardcoded `/Users/` path remains anywhere
+in `tests/`, `src/`, or `scripts/`.
+**Status:** Resolved.
 
 ### W011 — decide()'s fallback response is missing documented return-dict keys (logged 2026-09-04, Candidate E E1 Step 3 planning)
 **Component:** src/brain/decision_engine.py (`DecisionEngine._fallback_response()`)
@@ -192,15 +227,13 @@ because the same question (does the fallback path need the new
 new field only (Step 3 explicitly adds `composition_used: False` to the
 fallback response, per supervisor decision, to avoid repeating this
 exact mistake for a second field) — the pre-existing `relationship_used`
-gap itself is untouched.
-**Fix (not done — logged only, per Candidate Discipline):** Add
-`relationship_used: False` to `_fallback_response()`'s return dict, or
-formally narrow `decide()`'s docstring to state which keys are
-fallback-path-conditional. Either fix is a one-line/one-line-doc change
-but touches a function outside E1's file-by-file contract.
-**When to address:** Alongside W010, in the same consolidation-audit pass,
-or immediately if a caller is ever found relying on `relationship_used`
-being present unconditionally.
+gap itself was left for a dedicated consolidation-audit pass (see fix
+below, which is that pass).
+**Fix — RESOLVED 2026-09-04 (Stage 3 consolidation audit):** added
+`"relationship_used": False` to `_fallback_response()`'s return dict,
+matching the pattern already established for `composition_used`. New
+regression test `test_fallback_response_includes_relationship_used_false`.
+**Status:** Resolved.
 
 ### W012 — RESOLVED 2026-09-04 — terrain_tendencies "wins"/"losses" were computed from the General's outcome, not the player's
 **Component:** `src/brain/player_profiler.py` (`update_profile()`'s
