@@ -1,8 +1,8 @@
 # Progress Tracker
 
-## Current Stage: STAGE 3 — IN PROGRESS 🔄
-## Last Updated: 2026-09-04 (Candidate E E1 COMPLETE + hardened)
-## Test Count: 445/445
+## Current Stage: STAGE 3 — CONSOLIDATION AUDIT IN PROGRESS 🔄
+## Last Updated: 2026-09-04 (Stage 3 completion evidence approved; consolidation audit underway)
+## Test Count: 461/461
 
 ---
 
@@ -672,6 +672,65 @@ infrastructure. Logged as W010. Separately, `decide()`'s
 key (predates E1; `composition_used` was deliberately NOT allowed to repeat
 this mistake, per supervisor decision — see Step 3 above). Logged as W011.
 Full detail on both in KNOWN_ISSUES.md.
+
+---
+
+### Stage 3 Consolidation Audit [IN PROGRESS 🔄, started 2026-09-04]
+
+Per Arman's explicit sequencing (approved by supervisor review): the
+multi-player completion exercise validates the intelligence loop; the
+consolidation audit is Stage 3's *final* closeout gate, run only after
+that evidence is approved — not a replacement for it, and not run before
+it. `state/STAGE3_COMPLETION_REPORT.md` documents the evidence phase,
+approved 2026-09-04. This section documents the audit itself.
+
+**Audit scope:** whole-project consistency check — test suite, live
+integration, documentation accuracy, and any consolidation-scoped items
+explicitly deferred to this point (per their own `state/DEFERRED_ITEMS.md`
+"when to address" notes).
+
+**Completed so far:**
+- **Baseline re-verified fresh, not assumed:** 461/461 tests, live
+  integration test 10/10 criteria, both re-run at the start of the audit.
+- **W010 (hardcoded absolute import paths) — fixed.** `test_grid.py`,
+  `test_battle.py`, `test_units.py`, `test_physics.py`, `test_logger.py`
+  all had `sys.path.insert(0, "/Users/Arman/Projects/general_brain/src")`
+  — a literal path tied to one specific machine and username. Replaced
+  with `Path(__file__).parent.parent / "src"` in all five, matching the
+  pattern already correct elsewhere. Verified no hardcoded `/Users/` path
+  remains anywhere in `tests/`, `src/`, or `scripts/`.
+- **W011 (missing `relationship_used` in `_fallback_response()`) —
+  fixed.** Added `"relationship_used": False` alongside the existing
+  `"composition_used": False`, matching the pattern E1 had already
+  established for the newer field. New regression test.
+- **D023 (store construction registry) — decided.** Judged from the
+  actual live `EpisodeLogger.__init__` (5 explicit lines, read directly
+  from `logger.py` during the audit, not speculated about): still
+  readable, no registry introduced. Re-open trigger recorded in
+  `DEFERRED_ITEMS.md`.
+- **D002 / D007 trigger status logged.** Both items' stated triggers
+  (Candidate C complete) have been met for a long time without either
+  being built. Logged explicitly in `DEFERRED_ITEMS.md` *why*: the Stage
+  3 completion exercise looked for supporting evidence and found
+  `insufficient evidence` for both — a documented, informed decision,
+  not an unexplained gap.
+- **`CLAUDE_BRIEFING.md` rewritten.** Was severely stale (written at
+  304/304, before any Stage 3 candidate existed — missing
+  `relationship_manager.py`, the `stores/` split, the composition/
+  relationship factors, `known_enemy_composition`, all of it). Full
+  rewrite reflecting current architecture, plus a new Rule 8 codifying
+  the player-perspective lesson from W012/W013 so it isn't relearned a
+  third time. This file is git-untracked (kept local-only, per explicit
+  request) — its accuracy must be re-verified independently by whoever
+  next reads it, since it no longer travels with the repo.
+
+**Remaining before Stage 3 can be formally closed:**
+- Final full-suite + integration re-run after all audit fixes land
+  (in progress)
+- Explicit sign-off from supervisor review that the audit itself is
+  sufficient
+- This section updated to `[COMPLETE ✅]` and the header's
+  "Current Stage" line changed to reflect formal closure — not before
 
 ---
 
