@@ -292,7 +292,7 @@ this same design process (see "Confidence and decay are not universal").
 | Enemy aggregate presence (count/health/morale/supply) | Turn-scoped, recomputed live | Direct observation (simulator-granted, not spatially earned — see note below) | No | No |
 | Visible terrain / visible events | Turn-scoped (events), battle-scoped (terrain) | Direct observation | No | No |
 | Weather | Turn-scoped | Direct observation | No | No |
-| Enemy composition (E1, not yet built) | Battle-scoped | Scout (new) | **Yes — this is what E1 adds** | Not in E1; staleness is explicitly E2's job |
+| Enemy composition (E1, complete 2026-09-04) | Battle-scoped | Scout (new) | **Yes — this is what E1 adds** | Not in E1; staleness is explicitly E2's job |
 | Terrain knowledge (`WorldModel`) | Permanent, cross-battle | Inference from repeated observation | Yes | No — fully recomputed from the full observation set each time, not decayed |
 | Doctrine | Permanent, cross-battle | Extracted from terrain knowledge (repeated pattern) | Yes | Yes — but failure-triggered only, never time-based |
 | Player profile tendencies | Permanent, cross-battle | Historical episode data | No | No |
