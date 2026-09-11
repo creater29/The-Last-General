@@ -754,10 +754,52 @@ explicitly deferred to this point (per their own `state/DEFERRED_ITEMS.md`
   next reads it, since it no longer travels with the repo.
 
 **Remaining before Stage 3 can be formally closed:**
-- Final full-suite + integration re-run after all audit fixes land
-  (in progress)
+
+**Full line-by-line documentation pass (2026-09-04), per explicit
+requirement that the audit not rely on targeted greps alone:**
+- `ARCHITECTURE.md` (1195 lines, read completely): found and fixed a
+  substantial gap the earlier grep pass missed — the "Core Data
+  Structures," "Decision Architecture (Stage 2)," and "Memory Layers"
+  sections were pre-implementation design draft never reconciled with
+  what was actually built (`PlayerProfile`'s aspirational tactical/
+  strategic/psychological structure never existed; the real schema is
+  flat). Added an explicit banner rather than deleting the content.
+  Corrected the Database Schema SQL block against live
+  `src/simulator/logger.py` table by table (`episodes` was missing two
+  columns; `player_profiles` was completely wrong — single-column PK
+  instead of composite `(server_id, player_id)`; `player_general_relationship`
+  was missing `server_id` in its PK and the `encounters` column).
+  Fixed a genuine internal self-contradiction (`hill.visibility_bonus`
+  presented as active in one section, confirmed dead code in another).
+- `PROGRESS.md` (this file, 824+ lines, read completely): Stage 1/2
+  file-by-file test-count tables had drifted significantly from real
+  counts (verified via `pytest --collect-only` per file) — corrected
+  with dated explanatory notes, not just silently updated numbers.
+  Everything from Candidate B onward verified as accurate, dated,
+  reconciling historical record — correctly left untouched. Two real
+  architecture decisions (relationship orthogonality, 5-factor scoring
+  expansion, the W012/W013 canonical-perspective rule) were missing from
+  the "permanent record" Architecture Decisions table; added.
+- `KNOWN_ISSUES.md` (296+ lines, read completely): found a duplicated
+  section header, two Watch List entries (W002, W008) describing
+  pre-Candidate-B/C states years out of date despite both candidates
+  being long complete, and two entries (W010, W011) already fixed
+  earlier in this same audit session but still marked "not done." All
+  corrected. Cross-referenced W003/W004/W006/W007 to their matching
+  `DEFERRED_ITEMS.md` items, which existed without pointing back.
+- `SESSION_HANDOFF.md`: current header and active handoff instructions
+  updated (not the preserved history below, per explicit instruction to
+  treat that as intentionally-kept narrative, same as this file's
+  Change Log). Local-only — this file is git-untracked.
+- `DEFERRED_ITEMS.md`: cross-checked against all of the above; already
+  substantively accurate from the earlier D002/D007/D023 pass.
+
+**What remains:**
+- Final full-suite + integration re-run after all audit fixes land —
+  done: 461/461, 10/10, re-verified after every batch of changes above,
+  not just once at the end.
 - Explicit sign-off from supervisor review that the audit itself is
-  sufficient
+  sufficient — **outstanding, the only remaining gate.**
 - This section updated to `[COMPLETE ✅]` and the header's
   "Current Stage" line changed to reflect formal closure — not before
 
