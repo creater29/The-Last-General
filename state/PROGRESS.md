@@ -1,8 +1,8 @@
 # Progress Tracker
 
-## Current Stage: STAGE 3 — COMPLETE ✅ (2026-09-04)
-## Last Updated: 2026-09-04 (Stage 3 formally closed — consolidation audit approved)
-## Test Count: 461/461
+## Current Stage: STAGE 3 — COMPLETE ✅ (formally closed 2026-09-04) | STAGE 4 — NOT STARTED
+## Last Updated: 2026-09-11 (pre-Stage-4 dead-code cleanup, R009, committed post-closure)
+## Test Count: 451/451 (461 at Stage 3 closure, -10 from R009 removing dead-code-exclusive tests)
 
 ---
 
@@ -15,12 +15,17 @@ what this table showed, grown by later Stage 3 candidates touching Stage
 Candidate E; `logger.py` shrank because Candidate D moved most of its
 persistence logic into `src/simulator/stores/`, with those tests now
 living in five separate files, not folded back into this table).
+Re-verified fresh again 2026-09-11 after R009 (pre-Stage-4 dead-code
+cleanup): `units.py` and `physics.py` both dropped, from removing
+`UnitGroup`/`make_group()`/`resolve_group_movement()`'s and
+`elevation_modifier()`'s exclusive test coverage — see
+`state/KNOWN_ISSUES.md` R009 for the full rationale.
 
 | File | Tests | Notes |
 |------|-------|-------|
 | src/simulator/grid.py | 12 | Terrain world, zone generation |
-| src/simulator/units.py | 29 | Unit types, mass, behaviour |
-| src/simulator/physics.py | 23 | Terrain interaction engine |
+| src/simulator/units.py | 22 | Unit types, mass, behaviour (was 29 — R009 removed 7 `UnitGroup` tests, dead code with no production caller) |
+| src/simulator/physics.py | 20 | Terrain interaction engine (was 23 — R009 removed 3 `elevation_modifier()` tests, dead code with no production caller) |
 | src/simulator/battle.py | 38 | Battle loop + to_brain_snapshot() (was 26 — Candidate E added `player_intent_fn` hook + reconnaissance tests) |
 | src/simulator/logger.py | 28 | Facade only, post-Candidate-D (was 35 pre-split — persistence logic + its tests now live in the five store files below) |
 | src/simulator/snapshot.py | 20 | CommanderKnowledge dataclass |
@@ -837,6 +842,57 @@ not begin it without observed evidence that E1's current capability is
 limiting the General's decision quality, same discipline as D023-D027.
 Check `state/DEFERRED_ITEMS.md` for whatever else is evidence-eligible in
 the meantime.
+
+---
+
+## Stage 3 → Stage 4 Transition
+
+### Pre-Stage-4 dead-code cleanup [COMPLETE ✅ — 2026-09-11, R009]
+
+Before any Stage 4 feature work, a repo-wide over-engineering audit
+(Ponytail's `/ponytail-audit`, code-complexity/bloat scope only) was run
+against the closed Stage 3 baseline (commit `e63553c`, 461/461 tests,
+10/10 live integration criteria). Reviewed, approved with required
+changes (one recommendation — moving `EpisodeLogger`'s cross-store
+diagnostic queries into individual stores — correctly rejected as
+violating the established facade/store architecture), implemented as one
+scoped change, verified, and committed. Full rationale in
+`state/KNOWN_ISSUES.md` R009.
+
+Removed: `UnitGroup`/`make_group()`/`PhysicsEngine.resolve_group_movement()`
+(unused parallel grouped-army abstraction), `PhysicsEngine.elevation_modifier()`
+(unused, disagreeing duplicate of the live elevation logic in
+`Unit.effective_attack_force()`), `Grid.ascii_map()`/`Grid.terrain_stats()`
+(unused debug helpers), a no-op WALL branch in `Cell.apply_mass()`, and
+their 10 exclusive tests. `requirements.txt` corrected: `time-machine`,
+`Faker`, `anyio` removed (zero imports anywhere), `numpy==1.26.4` added
+(was an undeclared runtime dependency — a fresh clone would have failed).
+
+Net: −290 lines, −3 dependencies, +1 previously-missing dependency.
+461 → 451 tests (exactly the 10 removed, nothing else). Full suite and
+`scripts/run_integration_test.py` re-verified green after the change.
+Committed `fb242b4`, pushed to `origin/main`.
+
+Explicitly deferred, not part of this cleanup: `battle.py`'s
+target-selection duplication in `_execute_general_intent()` — flagged by
+the same audit, left untouched because it sits inside the turn-loop
+internals D009 will redesign.
+
+### Stage 4 kickoff — NOT STARTED
+
+D009 (`state/DEFERRED_ITEMS.md`) is the designated Stage 4 entry point:
+replace `battle.py`'s `_run_turn()` turn-based loop with an event-queue
+system, with the turn-based loop kept as a fallback/config option, not
+deleted. No Stage 4 design conversation, technical specification, or
+implementation plan exists yet — per the project's standing discipline
+(state the plan, get it reviewed, wait for confirmation, only then
+implement — the same sequence used for every Candidate D phase and every
+Candidate E step), do not begin D009 implementation without that sequence
+happening first. D009's own "What to do" checklist item ("All 318
+existing tests must still pass after refactor") is stale — the actual
+gate is whatever `pytest tests/` reports at the time D009 begins (451 as
+of this entry), not the number written in 2026 when D009 was first
+logged.
 
 ---
 
