@@ -1,7 +1,7 @@
 # Progress Tracker
 
-## Current Stage: STAGE 3 — CONSOLIDATION AUDIT IN PROGRESS 🔄
-## Last Updated: 2026-09-04 (Stage 3 completion evidence approved; consolidation audit underway)
+## Current Stage: STAGE 3 — COMPLETE ✅ (2026-09-04)
+## Last Updated: 2026-09-04 (Stage 3 formally closed — consolidation audit approved)
 ## Test Count: 461/461
 
 ---
@@ -74,7 +74,7 @@ below.
 
 ---
 
-## Stage 3 — Live Pipeline [IN PROGRESS 🔄]
+## Stage 3 — Live Pipeline [COMPLETE ✅ (2026-09-04)]
 
 ### Candidate A — Live Integration Test [COMPLETE ✅]
 **Completed:** 2026-06-28
@@ -704,7 +704,7 @@ Full detail on both in KNOWN_ISSUES.md.
 
 ---
 
-### Stage 3 Consolidation Audit [IN PROGRESS 🔄, started 2026-09-04]
+### Stage 3 Consolidation Audit [COMPLETE ✅ — approved 2026-09-04]
 
 Per Arman's explicit sequencing (approved by supervisor review): the
 multi-player completion exercise validates the intelligence loop; the
@@ -799,9 +799,44 @@ requirement that the audit not rely on targeted greps alone:**
   done: 461/461, 10/10, re-verified after every batch of changes above,
   not just once at the end.
 - Explicit sign-off from supervisor review that the audit itself is
-  sufficient — **outstanding, the only remaining gate.**
-- This section updated to `[COMPLETE ✅]` and the header's
-  "Current Stage" line changed to reflect formal closure — not before
+  sufficient — **received 2026-09-04.**
+
+**STAGE 3 IS FORMALLY CLOSED, 2026-09-04.**
+
+Approved as covering the required whole-project gates: live baseline,
+portability (W010), return-contract consistency (W011), deferred-item
+decisions (D002/D007/D023), known-issue status (W002/W008 and the rest of
+`KNOWN_ISSUES.md`), full canonical-document review (`ARCHITECTURE.md`,
+`PROGRESS.md`, `KNOWN_ISSUES.md`, `SESSION_HANDOFF.md`'s active
+instructions), and final test/integration verification. The local-only
+status of `SESSION_HANDOFF.md`/`CLAUDE_BRIEFING.md` is an acknowledged
+continuity risk, not a closure blocker — the tracked state documents
+(this file, `ARCHITECTURE.md`, `KNOWN_ISSUES.md`, `DEFERRED_ITEMS.md`,
+`STAGE3_COMPLETION_REPORT.md`) now contain the durable record.
+
+**Closure summary — what Stage 3 delivered:**
+- Candidates A-E, all complete: live integration pipeline, doctrine
+  feedback loop, player-general relationship, five-store repository
+  split, and confidence-gated enemy composition reconnaissance.
+- A validated, evidence-based multi-player intelligence loop:
+  `PlayerProfiler` and `RelationshipManager` confirmed to accumulate
+  real player-specific history and measurably change `DecisionEngine`
+  scores, via controlled factor comparisons on identical snapshots — not
+  merely "the code exists and doesn't crash."
+- Two real, live decision-quality bugs (W012, W013) found and fixed
+  during that validation, at a single canonical source
+  (`player_won()`/`player_lost()`), with regression tests using known
+  General-win/General-loss episodes — not incidentally caught by a
+  dataset happening to expose them.
+- A whole-project consolidation audit: every canonical state document
+  read line-by-line and reconciled against live code, not sampled.
+
+**Next-state rule, effective now:** Stage 4 does not start automatically.
+Candidate E's E2 (Information Availability) remains evidence-gated — do
+not begin it without observed evidence that E1's current capability is
+limiting the General's decision quality, same discipline as D023-D027.
+Check `state/DEFERRED_ITEMS.md` for whatever else is evidence-eligible in
+the meantime.
 
 ---
 
