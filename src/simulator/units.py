@@ -1,15 +1,22 @@
 """
 units.py — Unit types and behavior on the battlefield.
 
-Defines UnitType, Unit, and UnitGroup.
+Defines UnitType and Unit.
 Units interact with terrain through the physics layer.
 The General reasons about unit TYPES and BEHAVIORS, not individual unit IDs.
+
+Note (pre-Stage-4 cleanup, 2026-09-11): a UnitGroup/make_group abstraction
+previously lived here (grouped mass, grouped movement, grouped supply). It
+was removed as dead code — BattleLoop and PhysicsEngine always operated on
+plain List[Unit], and UnitGroup had no production caller, only its own
+dedicated tests. If Stage 4 needs formations, design that from the actual
+requirement rather than reviving this.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict
 import uuid
 
 from simulator.grid import Cell, TerrainType
@@ -346,180 +353,9 @@ class Unit:
 
 
 # ---------------------------------------------------------------------------
-# UnitGroup
-# ---------------------------------------------------------------------------
-
-class UnitGroup:
-    """
-    A collection of units acting together — an army, a regiment, a detachment.
-    The General reasons about groups, not individual units.
-
-    Groups have combined mass (for terrain physics),
-    combined behavioral signature (for doctrine application),
-    and collective supply state.
-    """
-
-    def __init__(self, units: List[Unit], label: str = ""):
-        self.units = units
-        self.label = label or f"group_{len(units)}units"
-
-    # ------------------------------------------------------------------
-    # Aggregate properties
-    # ------------------------------------------------------------------
-
-    @property
-    def alive_units(self) -> List[Unit]:
-        return [u for u in self.units if u.is_alive()]
-
-    @property
-    def effective_units(self) -> List[Unit]:
-        return [u for u in self.units if u.is_effective()]
-
-    @property
-    def total_mass(self) -> float:
-        """Combined mass of all alive units — key for terrain physics."""
-        return sum(u.mass for u in self.alive_units)
-
-    @property
-    def size(self) -> int:
-        return len(self.alive_units)
-
-    @property
-    def is_combat_effective(self) -> bool:
-        return len(self.effective_units) > 0
-
-    def composition(self) -> Dict[str, int]:
-        """Count of each unit type — commander-level view."""
-        counts: Dict[str, int] = {t.value: 0 for t in UnitType}
-        for u in self.alive_units:
-            counts[u.unit_type.value] += 1
-        return counts
-
-    def dominant_type(self) -> str:
-        """Which unit type makes up the majority."""
-        comp = self.composition()
-        return max(comp, key=comp.get)
-
-    def avg_supply(self) -> float:
-        if not self.alive_units:
-            return 0.0
-        return round(sum(u.supply for u in self.alive_units) / len(self.alive_units), 3)
-
-    def avg_morale(self) -> float:
-        if not self.alive_units:
-            return 0.0
-        return round(sum(u.morale for u in self.alive_units) / len(self.alive_units), 3)
-
-    def avg_health(self) -> float:
-        if not self.alive_units:
-            return 0.0
-        return round(sum(u.health for u in self.alive_units) / len(self.alive_units), 3)
-
-    # ------------------------------------------------------------------
-    # Group movement
-    # ------------------------------------------------------------------
-
-    def can_move_to(self, cell: Cell) -> Tuple[bool, str]:
-        """
-        Can this group move to a cell?
-        A group is blocked if ANY unit cannot move there
-        (the slowest/most restricted unit determines group movement).
-        """
-        for unit in self.alive_units:
-            can, reason = unit.can_move_to(cell)
-            if not can:
-                return False, f"{unit.unit_type.value}:{reason}"
-        return True, "ok"
-
-    def move_to(self, cell: Cell) -> List[str]:
-        """
-        Move all alive units to a cell.
-        Returns list of terrain events triggered.
-        NOTE: Mass accumulates per unit — heavy groups break ice faster.
-        """
-        events = []
-        for unit in self.alive_units:
-            event = unit.move_to(cell)
-            if event and not event.startswith("move_blocked"):
-                events.append(event)
-        return events
-
-    # ------------------------------------------------------------------
-    # Group supply
-    # ------------------------------------------------------------------
-
-    def tick_supply(self) -> None:
-        for unit in self.alive_units:
-            unit.tick_supply()
-
-    def resupply(self, amount: float = 0.3) -> None:
-        for unit in self.alive_units:
-            unit.resupply(amount)
-
-    def supply_status(self) -> str:
-        avg = self.avg_supply()
-        if avg > 0.6:  return "supplied"
-        if avg > 0.2:  return "strained"
-        return "starving"
-
-    # ------------------------------------------------------------------
-    # Group features for episode logging
-    # ------------------------------------------------------------------
-
-    def group_features(self) -> dict:
-        """
-        Commander-level description of this group.
-        No raw stats — behavioral and compositional features only.
-        This is what gets logged in episodes for the brain to learn from.
-        """
-        comp = self.composition()
-        return {
-            "label":           self.label,
-            "size":            self.size,
-            "total_mass_kg":   round(self.total_mass, 1),
-            "is_heavy_group":  self.total_mass > 500.0,
-            "dominant_type":   self.dominant_type(),
-            "composition":     comp,
-            "has_cavalry":     comp[UnitType.CAVALRY.value] > 0,
-            "has_siege":       comp[UnitType.SIEGE.value] > 0,
-            "has_ranged":      comp[UnitType.ARCHER.value] > 0,
-            "supply_status":   self.supply_status(),
-            "avg_morale":      self.avg_morale(),
-            "avg_health":      self.avg_health(),
-            "is_effective":    self.is_combat_effective,
-        }
-
-    def __repr__(self) -> str:
-        comp = self.composition()
-        parts = [f"{v}{k[0].upper()}" for k, v in comp.items() if v > 0]
-        return (
-            f"UnitGroup({self.label}: {'+'.join(parts)} "
-            f"mass={self.total_mass:.0f}kg "
-            f"supply={self.supply_status()})"
-        )
-
-
-# ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
 
 def make_unit(unit_type: UnitType, owner: str, position: Tuple[int, int]) -> Unit:
     """Convenience factory."""
     return Unit(unit_type=unit_type, owner=owner, position=position)
-
-
-def make_group(
-    composition: Dict[UnitType, int],
-    owner: str,
-    position: Tuple[int, int],
-    label: str = "",
-) -> UnitGroup:
-    """
-    Create a UnitGroup from a composition dict.
-    Example: make_group({UnitType.CAVALRY: 3, UnitType.INFANTRY: 10}, "general", (50, 50))
-    """
-    units = []
-    for unit_type, count in composition.items():
-        for _ in range(count):
-            units.append(make_unit(unit_type, owner, position))
-    return UnitGroup(units, label=label or f"{owner}_group")

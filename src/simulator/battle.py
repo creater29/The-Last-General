@@ -25,7 +25,7 @@ import random
 import uuid
 
 from simulator.grid import Grid, Cell, TerrainType
-from simulator.units import Unit, UnitGroup, UnitType, make_unit, make_group
+from simulator.units import Unit, UnitType, make_unit
 from simulator.physics import PhysicsEngine, TerrainEvent, CombatResult
 
 

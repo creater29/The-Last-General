@@ -1,5 +1,5 @@
 """
-test_units.py — Verify unit behavior, terrain interaction, group mechanics.
+test_units.py — Verify unit behavior and terrain interaction.
 """
 import sys
 from pathlib import Path
@@ -7,8 +7,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from simulator.grid import Grid, Cell, TerrainType
 from simulator.units import (
-    Unit, UnitGroup, UnitType, UNIT_BASE_STATS,
-    make_unit, make_group
+    Unit, UnitType, UNIT_BASE_STATS,
+    make_unit
 )
 
 
@@ -200,64 +200,6 @@ def test_archer_behavioral_features():
     assert features["is_heavy"]  == False
     assert features["is_fast"]   == False
 
-
-# ---------------------------------------------------------------------------
-# UnitGroup
-# ---------------------------------------------------------------------------
-
-def test_group_total_mass():
-    group = make_group(
-        {UnitType.CAVALRY: 2, UnitType.INFANTRY: 5},
-        owner="general", position=(50, 50)
-    )
-    # 2×600 + 5×80 = 1200 + 400 = 1600
-    assert group.total_mass == 1600.0
-
-def test_group_dominant_type():
-    group = make_group(
-        {UnitType.CAVALRY: 1, UnitType.INFANTRY: 8},
-        owner="player_1", position=(10, 10)
-    )
-    assert group.dominant_type() == "infantry"
-
-def test_group_is_heavy():
-    heavy = make_group({UnitType.SIEGE: 1}, owner="general", position=(0, 0))
-    light = make_group({UnitType.ARCHER: 5}, owner="player_1", position=(0, 0))
-    assert heavy.group_features()["is_heavy_group"] == True
-    assert light.group_features()["is_heavy_group"] == False
-
-def test_group_move_triggers_ice_break():
-    """A cavalry group moving onto ice should break it from combined mass."""
-    ice_cell = Cell(x=20, y=20, terrain=TerrainType.FROZEN_LAKE,
-                    break_threshold=800.0, cascade=False)
-    group = make_group({UnitType.CAVALRY: 2}, owner="player_1", position=(19, 20))
-    events = group.move_to(ice_cell)
-    assert "ice_break" in events
-
-def test_group_features_no_raw_stats():
-    """group_features() must not expose raw physics values."""
-    group = make_group(
-        {UnitType.CAVALRY: 3, UnitType.INFANTRY: 6},
-        owner="general", position=(50, 50)
-    )
-    features = group.group_features()
-    # Should have total_mass_kg (observable) but not attack_force
-    assert "total_mass_kg" in features
-    assert "attack_force"  not in features
-    assert "speed"         not in features
-
-def test_group_supply_status():
-    group = make_group({UnitType.INFANTRY: 3}, owner="general", position=(0, 0))
-    assert group.supply_status() == "supplied"
-    for u in group.units:
-        u.supply = 0.1
-    assert group.supply_status() == "starving"
-
-def test_dead_units_excluded_from_group():
-    group = make_group({UnitType.INFANTRY: 3}, owner="general", position=(0, 0))
-    group.units[0].take_damage(1.0)  # kill one
-    assert group.size == 2
-    assert len(group.alive_units) == 2
 
 def test_deterministic_unit_id():
     """Unit IDs should be unique per instance."""

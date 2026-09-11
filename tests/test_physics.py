@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from simulator.grid import Grid, Cell, TerrainType
-from simulator.units import Unit, UnitType, UnitGroup, make_unit, make_group
+from simulator.units import Unit, UnitType, make_unit
 from simulator.physics import PhysicsEngine, TerrainEvent, CombatResult
 
 
@@ -353,45 +353,6 @@ def test_get_event_summary_no_raw_physics():
     assert "event_type"       in obs
     assert "triggered_by_type" in obs
     assert "casualties"       in obs
-
-
-# ---------------------------------------------------------------------------
-# Elevation modifier
-# ---------------------------------------------------------------------------
-
-def test_downhill_attack_bonus():
-    grid = make_grid()
-    engine = PhysicsEngine(grid)
-    high = Cell(x=0, y=0, terrain=TerrainType.HILL, elevation=15.0,
-                break_threshold=float("inf"))
-    low  = Cell(x=1, y=0, terrain=TerrainType.PLAIN, elevation=0.0,
-                break_threshold=float("inf"))
-
-    mod = engine.elevation_modifier(high, low, UnitType.INFANTRY)
-    assert mod > 1.0  # downhill attack bonus
-
-def test_uphill_attack_penalty():
-    grid = make_grid()
-    engine = PhysicsEngine(grid)
-    low  = Cell(x=0, y=0, terrain=TerrainType.PLAIN, elevation=0.0,
-                break_threshold=float("inf"))
-    high = Cell(x=1, y=0, terrain=TerrainType.HILL, elevation=15.0,
-                break_threshold=float("inf"))
-
-    mod = engine.elevation_modifier(low, high, UnitType.CAVALRY)
-    assert mod < 1.0  # uphill penalty
-
-def test_cavalry_penalized_more_uphill_than_infantry():
-    grid = make_grid()
-    engine = PhysicsEngine(grid)
-    low  = Cell(x=0, y=0, terrain=TerrainType.PLAIN, elevation=0.0,
-                break_threshold=float("inf"))
-    high = Cell(x=1, y=0, terrain=TerrainType.HILL, elevation=15.0,
-                break_threshold=float("inf"))
-
-    mod_cav = engine.elevation_modifier(low, high, UnitType.CAVALRY)
-    mod_inf = engine.elevation_modifier(low, high, UnitType.INFANTRY)
-    assert mod_cav < mod_inf
 
 
 if __name__ == "__main__":

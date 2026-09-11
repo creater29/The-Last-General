@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, TYPE_CHECKING
 
 from simulator.grid import Cell, Grid, TerrainType, TERRAIN_PHYSICS
-from simulator.units import Unit, UnitGroup, UnitType, UNIT_BASE_STATS
+from simulator.units import Unit, UnitType
 
 if TYPE_CHECKING:
     pass
@@ -181,31 +181,6 @@ class PhysicsEngine:
         unit._consume_supply()
 
         return True, terrain_event
-
-    def resolve_group_movement(
-        self,
-        group: UnitGroup,
-        target_cell: Cell,
-    ) -> Tuple[bool, List[TerrainEvent]]:
-        """
-        Move an entire group to target_cell.
-        Group mass accumulates — can break terrain single units couldn't.
-        Returns (success, list_of_terrain_events).
-        """
-        can_move, reason = group.can_move_to(target_cell)
-        if not can_move:
-            return False, []
-
-        events = []
-        # Reset cell mass for accurate group calculation
-        previous_mass = target_cell.current_mass
-
-        for unit in group.alive_units:
-            _, event = self.resolve_movement(unit, target_cell)
-            if event:
-                events.append(event)
-
-        return True, events
 
     def resolve_siege_attack(
         self,
@@ -405,35 +380,13 @@ class PhysicsEngine:
             terrain_event=terrain_event,
         )
 
-    # ------------------------------------------------------------------
-    # Elevation physics
-    # ------------------------------------------------------------------
-
-    def elevation_modifier(
-        self,
-        attacker_cell: Cell,
-        defender_cell: Cell,
-        unit_type: UnitType,
-    ) -> float:
-        """
-        Compute force modifier from elevation difference.
-        Attacking uphill is penalized. Attacking downhill is a bonus.
-        Returns multiplier (1.0 = neutral).
-        """
-        elev_diff = attacker_cell.elevation - defender_cell.elevation
-
-        if elev_diff > 0:
-            # Attacking downhill — bonus
-            bonus = min(0.25, elev_diff / 40.0)
-            return 1.0 + bonus
-        else:
-            # Attacking uphill — penalty scales with unit's uphill_penalty stat
-            # Cavalry (0.35) is penalized much more than infantry (0.10)
-            stats = UNIT_BASE_STATS[unit_type]
-            penalty_rate = stats.get("uphill_penalty", 0.10)
-            # Scale: at elev_diff=15, infantry gets ~0.15 penalty, cavalry ~0.525
-            penalty = min(0.6, abs(elev_diff) / 20.0 * penalty_rate * 4)
-            return max(0.35, 1.0 - penalty)
+    # Note (pre-Stage-4 cleanup, 2026-09-11): a standalone elevation_modifier()
+    # previously lived here. It was removed as dead code — resolve_combat()
+    # has never called it; elevation's actual effect on attack force runs
+    # through Unit.effective_attack_force()'s uphill_penalty lookup in
+    # units.py. Two independent, disagreeing implementations of "how
+    # elevation affects attack force" is a correctness trap, not a feature;
+    # only the live one (units.py) remains.
 
     # ------------------------------------------------------------------
     # Weather effects

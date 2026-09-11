@@ -13,6 +13,66 @@ None.
 
 ## Resolved Issues
 
+### R009 — Pre-Stage-4 dead-code cleanup (RESOLVED 2026-09-11, ponytail-audit)
+**Component:** src/simulator/units.py, src/simulator/physics.py,
+src/simulator/grid.py, requirements.txt
+**Description:** A repo-wide over-engineering audit (Ponytail's
+`/ponytail-audit`, scoped to code complexity/bloat only, run against
+Stage 3's closed baseline at commit `e63553c`, 461/461 tests) found five
+genuinely unused code paths, each confirmed by repo-wide grep with zero
+callers outside their own dedicated tests, plus three unused declared
+dependencies:
+- `UnitGroup` / `make_group()` (`units.py`) and
+  `PhysicsEngine.resolve_group_movement()` (`physics.py`) — a full
+  parallel "grouped army" abstraction (grouped mass, grouped movement,
+  grouped supply) that `BattleLoop` never used; the actual turn loop
+  always operated on plain `List[Unit]`. Only self-tested, no production
+  caller.
+- `PhysicsEngine.elevation_modifier()` (`physics.py`) — a second,
+  independent implementation of "how elevation affects attack force,"
+  never called from `resolve_combat()`. The live implementation is
+  `Unit.effective_attack_force()`'s `uphill_penalty` lookup in
+  `units.py`. Two disagreeing formulas for the same concept, only one
+  load-bearing, is a correctness trap for whoever edits combat math next
+  and doesn't realize the other one exists.
+- `Grid.ascii_map()` / `Grid.terrain_stats()` (`grid.py`) — debug-print
+  helpers with zero callers anywhere in `src/`, `scripts/`, or `tests/`.
+- A no-op `if ... pass` branch in `Cell.apply_mass()` for the WALL case
+  (wall collapse is handled elsewhere, via siege force in
+  `PhysicsEngine`, not mass) — replaced with an explanatory comment, no
+  behavior change.
+- `requirements.txt` declared `time-machine`, `Faker`, and `anyio` with
+  zero imports anywhere in the codebase. Separately, `numpy` (imported in
+  `grid.py`, used for terrain-noise generation and elevation variance) was
+  **not** declared at all — a fresh clone would fail. Both fixed together.
+**Decision:** Supervisor review (🟡 approved with required changes)
+rejected one recommendation — moving `EpisodeLogger`'s cross-store
+diagnostic queries (`summary()`, `result_distribution()`,
+`terrain_event_frequency()`, `get_episodes_by_terrain_event()`) into
+individual stores — on the grounds that these are intentionally
+facade-level, cross-store responsibilities under the established D014
+architecture, not store-owned persistence. Correctly rejected; not
+implemented.
+**Fix:** Removed `UnitGroup`, `make_group()`, `resolve_group_movement()`,
+`elevation_modifier()`, `ascii_map()`, `terrain_stats()`, and the no-op
+WALL branch, along with their exclusive tests
+(`test_group_total_mass`, `test_group_dominant_type`,
+`test_group_is_heavy`, `test_group_move_triggers_ice_break`,
+`test_group_features_no_raw_stats`, `test_group_supply_status`,
+`test_dead_units_excluded_from_group` in `test_units.py`;
+`test_downhill_attack_bonus`, `test_uphill_attack_penalty`,
+`test_cavalry_penalized_more_uphill_than_infantry` in `test_physics.py`)
+and now-unused imports in `battle.py`, `test_battle.py`, `test_physics.py`,
+`test_units.py`. `requirements.txt` corrected: removed the three unused
+packages, added `numpy` pinned, and replaced the stale hardcoded
+"413 passed" test-count comment with a pointer to `state/PROGRESS.md`.
+Target-selection duplication inside `battle.py`'s
+`_execute_general_intent()` (noted by the same audit) was explicitly
+**not** touched — deferred to D009, which will redesign that turn-loop
+area anyway.
+**Status:** Resolved. Full suite + integration test re-verified green
+after the change (see `state/PROGRESS.md` for the current count).
+
 ### R008 — get_known_players() removed (RESOLVED 2026-06-28, Candidate D Phase 6)
 **Component:** src/simulator/logger.py
 **Description:** Was orphaned and broken — queried `encounter_count`, a

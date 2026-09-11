@@ -180,9 +180,8 @@ class Cell:
                 self.is_broken = True
                 return "ice_break"
 
-        if self.terrain == TerrainType.WALL and not self.is_broken:
-            # Wall collapse handled by physics engine via siege force, not mass
-            pass
+        # Note: WALL collapse is handled by PhysicsEngine via siege force,
+        # not mass accumulation — no mass-triggered branch needed here.
 
         return None
 
@@ -528,51 +527,3 @@ class Grid:
                 broken.append((neighbor.x, neighbor.y))
 
         return broken
-
-    # ------------------------------------------------------------------
-    # Debug / Visualization
-    # ------------------------------------------------------------------
-
-    def ascii_map(self, width: int = 50, height: int = 25) -> str:
-        """
-        Print a scaled-down ASCII representation.
-        Useful for debugging terrain generation.
-        """
-        symbols = {
-            TerrainType.PLAIN:       ".",
-            TerrainType.FROZEN_LAKE: "~",
-            TerrainType.FOREST:      "T",
-            TerrainType.HILL:        "^",
-            TerrainType.RIVER:       "=",
-            TerrainType.ROAD:        "-",
-            TerrainType.WALL:        "#",
-        }
-        step_x = max(1, self.width  // width)
-        step_y = max(1, self.height // height)
-        rows   = []
-        for y in range(0, self.height, step_y):
-            row = ""
-            for x in range(0, self.width, step_x):
-                cell = self.cells[y][x]
-                sym  = symbols.get(cell.terrain, "?")
-                if cell.is_broken:  sym = "x"
-                if cell.is_burning: sym = "*"
-                row += sym
-            rows.append(row)
-
-        legend = (
-            "  . plain  ~ lake  T forest  ^ hill  "
-            "= river  - road  # wall  x broken  * fire"
-        )
-        return "\n".join(rows) + "\n" + legend
-
-    def terrain_stats(self) -> str:
-        """Print terrain distribution for quick verification."""
-        total  = self.width * self.height
-        lines  = [f"Grid {self.width}x{self.height} (seed={self.seed}):"]
-        for terrain in TerrainType:
-            count = len(self.cells_of_type(terrain))
-            pct   = 100 * count / total
-            bar   = "█" * int(pct / 2)
-            lines.append(f"  {terrain.value:<14} {count:>5} ({pct:5.1f}%)  {bar}")
-        return "\n".join(lines)

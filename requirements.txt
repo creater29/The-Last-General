@@ -6,13 +6,20 @@
 #
 # Test:
 #   python3 -m pytest tests/ --tb=short -q
-# Expected count changes as work progresses — check state/PROGRESS.md for
-# the current figure rather than trusting this comment, which goes stale
-# on every commit that adds tests. Last known-correct at commit time:
-# 413 passed (Candidate E E1 Step 2, in progress).
+# Test count changes as work progresses — see state/PROGRESS.md for the
+# current figure rather than trusting a number in this comment; that
+# number goes stale on every commit that adds tests. (A previous version
+# of this comment hardcoded "413 passed, Candidate E E1 Step 2, in
+# progress" and was left uncorrected well past that point — fixed
+# 2026-09-11, pre-Stage-4 cleanup.)
+#
+# time-machine, Faker, and anyio were removed 2026-09-11 (pre-Stage-4
+# cleanup) — zero imports anywhere in the codebase, confirmed by
+# repo-wide search. numpy was added the same day: it was already an
+# undeclared runtime dependency (src/simulator/grid.py uses it for
+# terrain-noise generation and elevation variance) — a fresh clone was
+# failing without it.
 
 pytest==9.0.2
 pytest-cov==7.1.0
-time-machine==2.16.0
-Faker==37.6.0
-anyio==4.13.0
+numpy==1.26.4
