@@ -1,7 +1,7 @@
 # Progress Tracker
 
-## Current Stage: STAGE 3 — COMPLETE ✅ (formally closed 2026-09-04) | STAGE 4 — NOT STARTED
-## Last Updated: 2026-09-11 (pre-Stage-4 dead-code cleanup, R009, committed post-closure)
+## Current Stage: STAGE 3 — COMPLETE ✅ | STAGE 4.0 (D009 spec) — COMPLETE ✅ | STAGE 4A (implementation plan) — NOT STARTED
+## Last Updated: 2026-09-12 (Stage 4.0 D009 technical specification approved, see state/stage4/)
 ## Test Count: 451/451 (461 at Stage 3 closure, -10 from R009 removing dead-code-exclusive tests)
 
 ---
@@ -878,21 +878,33 @@ target-selection duplication in `_execute_general_intent()` — flagged by
 the same audit, left untouched because it sits inside the turn-loop
 internals D009 will redesign.
 
-### Stage 4 kickoff — NOT STARTED
+### Stage 4.0 — D009 technical specification [COMPLETE ✅ — 2026-09-12]
 
-D009 (`state/DEFERRED_ITEMS.md`) is the designated Stage 4 entry point:
-replace `battle.py`'s `_run_turn()` turn-based loop with an event-queue
-system, with the turn-based loop kept as a fallback/config option, not
-deleted. No Stage 4 design conversation, technical specification, or
-implementation plan exists yet — per the project's standing discipline
-(state the plan, get it reviewed, wait for confirmation, only then
-implement — the same sequence used for every Candidate D phase and every
-Candidate E step), do not begin D009 implementation without that sequence
-happening first. D009's own "What to do" checklist item ("All 318
-existing tests must still pass after refactor") is stale — the actual
-gate is whatever `pytest tests/` reports at the time D009 begins (451 as
-of this entry), not the number written in 2026 when D009 was first
-logged.
+D009 (`state/DEFERRED_ITEMS.md`) is the designated Stage 4 entry point.
+Its full technical specification (`ExecutionMode` split, `PlannedAction`/
+`ActionResolution` data structures, corrected event-driven round
+ordering, `_validate_action` defensive validation, exactly-once event
+capture sequencing, reactive-checkpoint budget rules, two-policy
+callback exception handling, partial-vs-terminal round semantics,
+`ObservationStore` compatibility, full test matrix, and explicit
+non-goals) is complete, reviewed across six revisions, and approved.
+Persisted at `state/stage4/S4-00-D009-SPEC.md`, indexed at
+`state/stage4/INDEX.md`. No code was written for this — specification
+only, per the project's standing discipline (state the plan, get it
+reviewed, wait for confirmation, only then implement).
+
+### Stage 4A — Implementation plan (legacy compiler extraction & equivalence) — NOT STARTED
+
+Next artefact: an implementation plan for extracting today's intent
+handlers into `_compile_<intent>_actions()` + immediate-execute-all,
+proven canonicalized-equivalent to current `TURN_BASED` behavior across
+seeds, before any `EVENT_DRIVEN` scheduling logic is built on it. Scoped
+to this extraction only — does not cover Stage 4B–4E. To be planned in
+a fresh session per `state/stage4/INDEX.md`'s reading-order guidance,
+not by reconstructing the Stage 4.0 scoping conversation. D009's own
+"What to do" checklist item ("All 318 existing tests must still pass
+after refactor") is stale — the actual gate is whatever `pytest tests/`
+reports at the time 4A begins (451 as of this entry).
 
 ---
 

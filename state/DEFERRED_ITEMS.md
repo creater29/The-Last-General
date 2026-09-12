@@ -171,6 +171,15 @@ See SESSION_HANDOFF.md for the full implementation spec. Summary:
 - Keep the turn-based loop as a fallback/config option. Do not delete it.
 - All 318 existing tests must still pass after refactor.
 
+**Status update (2026-09-12):** Stage 4.0 (technical specification) is
+complete and approved — see `state/stage4/S4-00-D009-SPEC.md` and
+`state/stage4/INDEX.md`. The note above ("All 318 existing tests must
+still pass") is superseded by the live test count at whatever point
+implementation lands (451 as of Stage 3 close) — the real gate is
+`pytest` output, not this stale figure. Stage 4A (implementation plan
+for legacy compiler extraction and equivalence testing) is not yet
+started.
+
 ---
 
 ### D014 — Logger.py repository split
